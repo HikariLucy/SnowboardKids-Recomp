@@ -32,7 +32,7 @@ Status: **In progress**
 - [x] Identify RSP microcode usage
 - [ ] Identify libultra dependencies used by the game
 - [x] Generate audio RSP translation
-- [ ] Validate audio RSP indirect jump-table targets
+- [x] Validate audio RSP indirect jump-table targets
 - [ ] Create initial N64Recomp config
 - [x] Produce first generated native code
 - [x] Document initial unsupported CPU/RSP boundary
