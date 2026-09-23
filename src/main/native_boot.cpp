@@ -1,14 +1,20 @@
+#include <algorithm>
+#include <array>
 #include <cinttypes>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
+#include "recompinput/input_events.h"
+#include "recompinput/input_state.h"
+#include "recompinput/profiles.h"
 #include "recompui/config.h"
 #include "recompui/renderer.h"
 #include "recompui/program_config.h"
@@ -68,11 +74,71 @@ void host_message_box(const char* msg) {
     std::fprintf(stderr, "[runtime] %s\n", msg);
 }
 
+static SDL_AudioCVT audio_convert{};
+static SDL_AudioDeviceID audio_device = 0;
+static uint32_t sample_rate = 48000;
+static uint32_t output_sample_rate = 48000;
+constexpr uint32_t input_channels = 2;
+static uint32_t output_channels = 2;
+constexpr uint32_t duplicated_input_frames = 4;
+static uint32_t discarded_output_frames = 0;
+constexpr uint32_t bytes_per_frame = input_channels * sizeof(float);
+
+void update_audio_converter() {
+    const int ret = SDL_BuildAudioCVT(
+        &audio_convert,
+        AUDIO_F32,
+        input_channels,
+        static_cast<int>(sample_rate),
+        AUDIO_F32,
+        output_channels,
+        static_cast<int>(output_sample_rate)
+    );
+
+    if (ret < 0) {
+        std::fprintf(stderr, "SDL_BuildAudioCVT failed: %s\n", SDL_GetError());
+        std::exit(EXIT_FAILURE);
+    }
+
+    discarded_output_frames = duplicated_input_frames * output_sample_rate / sample_rate;
+}
+
+bool reset_audio(uint32_t output_freq) {
+    SDL_AudioSpec desired{
+        .freq = static_cast<int>(output_freq),
+        .format = AUDIO_F32,
+        .channels = static_cast<Uint8>(output_channels),
+        .silence = 0,
+        .samples = 0x100,
+        .padding = 0,
+        .size = 0,
+        .callback = nullptr,
+        .userdata = nullptr,
+    };
+
+    audio_device = SDL_OpenAudioDevice(nullptr, false, &desired, nullptr, 0);
+    if (audio_device == 0) {
+        std::fprintf(stderr, "SDL_OpenAudioDevice failed: %s\n", SDL_GetError());
+        return false;
+    }
+
+    SDL_PauseAudioDevice(audio_device, 0);
+    output_sample_rate = output_freq;
+    update_audio_converter();
+    std::printf("SDL audio device opened at %" PRIu32 " Hz\n", output_freq);
+    return true;
+}
+
 ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
     SDL_SetHint(SDL_HINT_GAMECONTROLLER_USE_BUTTON_LABELS, "0");
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_AUDIO) < 0) {
         std::fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+        std::exit(EXIT_FAILURE);
+    }
+
+    if (!reset_audio(48000)) {
         std::exit(EXIT_FAILURE);
     }
 
@@ -103,27 +169,95 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 }
 
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
-    SDL_Event event{};
-    while (SDL_PollEvent(&event)) {
-        if (event.type == SDL_QUIT) {
-            ultramodern::quit();
-        }
-    }
+    recompinput::handle_events();
 }
 
-void queue_samples(int16_t*, size_t) {
-    // First-boot validation intentionally discards host audio.
+void queue_samples(int16_t* audio_data, size_t sample_count) {
+    if (audio_device == 0 || sample_count == 0) {
+        return;
+    }
+
+    static std::vector<float> swap_buffer;
+    static std::array<float, duplicated_input_frames * input_channels> duplicated_sample_buffer{};
+
+    const size_t resampled_sample_count = sample_count + duplicated_input_frames * input_channels;
+    const size_t max_sample_count =
+        std::max(resampled_sample_count, resampled_sample_count * static_cast<size_t>(audio_convert.len_mult));
+
+    if (max_sample_count > swap_buffer.size()) {
+        swap_buffer.resize(max_sample_count);
+    }
+
+    for (size_t i = 0; i < duplicated_input_frames * input_channels; ++i) {
+        swap_buffer[i] = duplicated_sample_buffer[i];
+    }
+
+    for (size_t i = 0; i + 1 < sample_count; i += input_channels) {
+        // Swap stereo channels to compensate for the N64/RDRAM endian layout.
+        swap_buffer[i + duplicated_input_frames * input_channels] =
+            audio_data[i + 1] * (0.5f / 32768.0f);
+        swap_buffer[i + 1 + duplicated_input_frames * input_channels] =
+            audio_data[i] * (0.5f / 32768.0f);
+    }
+
+    if (sample_count >= duplicated_input_frames * input_channels) {
+        for (size_t i = 0; i < duplicated_input_frames * input_channels; ++i) {
+            duplicated_sample_buffer[i] = swap_buffer[i + sample_count];
+        }
+    }
+
+    audio_convert.buf = reinterpret_cast<Uint8*>(swap_buffer.data());
+    audio_convert.len =
+        static_cast<int>((sample_count + duplicated_input_frames * input_channels) * sizeof(float));
+
+    if (SDL_ConvertAudio(&audio_convert) < 0) {
+        std::fprintf(stderr, "SDL_ConvertAudio failed: %s\n", SDL_GetError());
+        return;
+    }
+
+    const uint32_t discarded_bytes =
+        output_channels * discarded_output_frames * sizeof(float);
+    if (static_cast<uint32_t>(audio_convert.len_cvt) <= discarded_bytes) {
+        return;
+    }
+
+    const uint32_t bytes_to_queue =
+        static_cast<uint32_t>(audio_convert.len_cvt) - discarded_bytes;
+    float* samples_to_queue =
+        swap_buffer.data() + output_channels * discarded_output_frames / 2;
+
+    SDL_QueueAudio(audio_device, samples_to_queue, bytes_to_queue);
 }
 
 size_t get_frames_remaining() {
-    return 0;
+    if (audio_device == 0) {
+        return 0;
+    }
+
+    uint64_t buffered_byte_count = SDL_GetQueuedAudioSize(audio_device);
+    buffered_byte_count =
+        buffered_byte_count * 2 * sample_rate / output_sample_rate / output_channels;
+
+    constexpr float buffer_offset_frames = 1.0f;
+    const uint32_t frames_per_vi = sample_rate / 60;
+    const uint32_t offset =
+        static_cast<uint32_t>(buffer_offset_frames * bytes_per_frame * frames_per_vi);
+
+    buffered_byte_count = buffered_byte_count > offset
+        ? buffered_byte_count - offset
+        : 0;
+
+    return static_cast<size_t>(buffered_byte_count / bytes_per_frame);
 }
 
 void set_frequency(uint32_t freq) {
     std::printf("N64 audio frequency requested: %" PRIu32 " Hz\n", freq);
+    sample_rate = freq;
+    update_audio_converter();
 }
 
 void poll_input() {
+    recompinput::poll_inputs();
 }
 
 void start_game_on_first_vi() {
@@ -138,18 +272,21 @@ void start_game_on_first_vi() {
     recomp::start_game(u8"snowboardkids.n64.us", "");
 }
 
+void on_vi() {
+    start_game_on_first_vi();
+    recompinput::update_rumble();
+}
+
 bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
-    if (controller_num != 0) {
+    if (controller_num < 0 || controller_num >= 4) {
         return false;
     }
 
-    *buttons = 0;
-    *x = 0.0f;
-    *y = 0.0f;
-    return true;
+    return recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
 }
 
-void set_rumble(int, bool) {
+void set_rumble(int controller_num, bool on) {
+    recompinput::set_rumble(controller_num, on);
 }
 
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
@@ -228,10 +365,9 @@ int main(int argc, char** argv) {
 
     recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
     recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
+    recomp::register_config_path(runtime_dir);
     snowboardkids::theme::apply();
     init_frontend_config();
-
-    recomp::register_config_path(runtime_dir);
 
     const recomp::GameEntry& game = supported_games[0];
 
@@ -286,7 +422,7 @@ int main(int argc, char** argv) {
     };
 
     ultramodern::events::callbacks_t events_callbacks{
-        .vi_callback = start_game_on_first_vi,
+        .vi_callback = on_vi,
         .gfx_init_callback = nullptr,
     };
 
