@@ -9,6 +9,7 @@
 
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
+#include "recompui/config.h"
 #include "recompui/renderer.h"
 #include "recompui/program_config.h"
 #include "recomp_theme.h"
@@ -44,6 +45,24 @@ std::vector<recomp::GameEntry> supported_games = {
 };
 
 namespace {
+
+void init_frontend_config() {
+    // Minimal standard RecompFrontend configuration for first boot.
+    // Game-specific settings can be added after the native boot path works.
+    recompui::config::GeneralTabOptions general_options{};
+    general_options.has_rumble_strength = true;
+    general_options.has_gyro_sensitivity = false;
+    general_options.has_mouse_sensitivity = false;
+
+    recompui::config::create_general_tab(general_options);
+    recompui::config::create_graphics_tab();
+    recompui::config::create_controls_tab();
+    recompui::config::create_sound_tab();
+    recompui::config::create_mods_tab();
+    recompui::config::finalize();
+
+    std::puts("RecompFrontend configuration finalized.");
+}
 
 void host_message_box(const char* msg) {
     std::fprintf(stderr, "[runtime] %s\n", msg);
@@ -198,6 +217,7 @@ int main(int argc, char** argv) {
     recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
     recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
     snowboardkids::theme::apply();
+    init_frontend_config();
 
     recomp::register_config_path(runtime_dir);
 
