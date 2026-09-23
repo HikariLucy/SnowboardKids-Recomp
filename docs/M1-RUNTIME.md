@@ -618,3 +618,24 @@ The patch:
 - clears the removed thread's queue/next links.
 
 The native boot runner verifies the exact pinned runtime revision and applies the patch idempotently before compiling.
+
+
+### First rendered frame — reached
+
+After implementing libultra-compatible stopping of another queued/blocked N64 thread, the native boot advanced beyond the audio-thread blocker and produced a visible Snowboard Kids frame.
+
+The rendered output is a snowy mountain scene displayed in the native SDL/Vulkan window. This establishes the complete rendering path:
+
+```text
+recompiled SBK1 game code
+  -> N64 display-list submission
+  -> N64ModernRuntime
+  -> RT64
+  -> Vulkan
+  -> host NVIDIA GPU
+  -> visible Snowboard Kids frame
+```
+
+This is the first visual proof that the game's original rendering workload is executing through the native recompilation stack rather than merely initializing the host renderer.
+
+The next runtime work is no longer "get a frame"; it is boot progression and interactivity: title/menu progression, stable timing/audio, and real input callbacks.
