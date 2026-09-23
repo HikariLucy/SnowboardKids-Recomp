@@ -41,3 +41,4 @@ rsp/*.cpp
 .deps-runtime/
 build-native-core/
 build-rom-inspect/
+build-runtime-smoke/
