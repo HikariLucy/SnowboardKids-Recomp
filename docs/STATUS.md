@@ -545,3 +545,24 @@ SBK_PRESENT_MODE=present-early
 ```
 
 The selected mode is printed at runtime. If Console eliminates or materially reduces flicker, presentation timing/buffering is confirmed as the cause rather than game logic or shader compilation.
+
+
+## Flicker resolved — PASS
+
+The persistent visual flicker was eliminated by changing the SBK1 RT64 presentation mode from:
+
+```text
+PresentationMode::PresentEarly
+```
+
+to:
+
+```text
+PresentationMode::Console
+```
+
+This confirms the flicker was caused by an incompatible presentation/buffering assumption rather than shader corruption, game logic, or unstable display lists. Snowboard Kids 1 requires the more console-faithful VI/framebuffer presentation path.
+
+The diagnostic launcher keeps `SBK_PRESENT_MODE` overrides available for future comparison, but `console` is now the validated default for SBK1.
+
+The in-game/frontend Options UI is also reachable, confirming that the RecompFrontend configuration modal is operational in the native port.
