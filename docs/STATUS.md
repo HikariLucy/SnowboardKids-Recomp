@@ -264,3 +264,6 @@ These are the exact revisions pinned by the working Snowboard Kids 2 recomp refe
 
 
 Renderer stack configuration reached RT64 Vulkan + RecompFrontend successfully. The first compile stopped in `recompinput` because SDL2's include directory was not propagated from the parent CMake project. SDL2 is installed; the root build now resolves it with `find_package(SDL2 REQUIRED)` before adding RecompFrontend, matching the working SBK2 build order.
+
+
+Renderer stack advanced past SDL2 integration to shader generation (536+/609 steps). RecompFrontend then inherited RT64's shader helper functions without RT64's directory-local `DXC` variable, causing HLSL files to be invoked directly. The root CMake now exposes the pinned RT64 DXC command/options before adding RecompFrontend, following the working SBK2 build pattern.
