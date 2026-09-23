@@ -253,7 +253,12 @@ if(SBK_BUILD_NATIVE_BOOT)
     target_compile_options(SnowboardKidsRecompiled PRIVATE
         -fno-strict-aliasing
         -fms-extensions
+        -fno-omit-frame-pointer
     )
+
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+        target_link_options(SnowboardKidsRecompiled PRIVATE -rdynamic)
+    endif()
 
     target_include_directories(SnowboardKidsRecompiled PRIVATE
         "${CMAKE_SOURCE_DIR}"
