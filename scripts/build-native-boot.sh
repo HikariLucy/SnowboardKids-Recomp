@@ -10,6 +10,11 @@ if [[ ! -f "$ROM" ]]; then
     exit 1
 fi
 
+if [[ ! -d "$ROOT_DIR/.deps-renderer/recomp-theme/.git" ]]; then
+    echo "Shared Snowboard Kids frontend theme is missing; bootstrapping renderer dependencies..."
+    bash "$ROOT_DIR/scripts/bootstrap-renderer-stack.sh"
+fi
+
 cmake \
     -S "$ROOT_DIR" \
     -B "$BUILD_DIR" \
