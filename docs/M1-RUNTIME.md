@@ -168,3 +168,19 @@ endif()
 ```
 
 The flags are scoped only to the RSP target and only to x86/x64. ARM64 remains on N64ModernRuntime's sse2neon path.
+
+
+### M1.5a result
+
+**PASS**
+
+The native-core build produced both archives successfully:
+
+```text
+build-native-core/libSnowboardKidsCpu.a
+build-native-core/libSnowboardKidsRsp.a
+```
+
+This is the first point in the project where the translated Snowboard Kids CPU and audio RSP code have both been compiled into native x86-64 machine-code libraries.
+
+The next step is no longer code-generation validation. It is runtime integration.
