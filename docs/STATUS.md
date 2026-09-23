@@ -362,3 +362,30 @@ The next graphical boot passed frontend configuration, font loading and RT64 ini
 Root-cause analysis of pinned N64ModernRuntime identified an initialization race in the diagnostic launcher: it called `recomp::start_game()` before `recomp::start()`. The VI thread therefore observed the game as already running and skipped its dummy VI initialization, leaving the first `ViState::mode` null before `update_vi()`.
 
 The diagnostic boot now leaves the game stopped while the runtime initializes. Its first VI callback fires only after the dummy VI mode/framebuffer has been seeded, then calls `recomp::start_game()`. This should wake the game thread at a valid video state and allow the generated entrypoint to run.
+
+
+## Generated game entrypoint — PASS
+
+On 2026-09-23 the first graphical native boot reached and executed Snowboard Kids' generated entrypoint:
+
+```text
+First safe VI reached; starting Snowboard Kids...
+Initializing recomp heap at offset 0x01000000 with size 0x1F000000
+>>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
+<<< SNOWBOARD KIDS RECOMP_ENTRYPOINT RETURNED
+N64 audio frequency requested: 22050 Hz
+```
+
+This completes the M1.5 exit criterion: original SBK1 code translated by N64Recomp is executing inside N64ModernRuntime on the Linux x86-64 host.
+
+The next runtime blocker is genuine game/libultra behavior. Snowboard Kids calls:
+
+```c
+osStopThread(&gAudioThread);
+...
+osStartThread(&gAudioThread);
+```
+
+while processing audio state. The pinned N64ModernRuntime only implemented `osStopThread` for the current thread and asserted when stopping a different thread.
+
+A project-owned runtime compatibility patch now implements libultra-compatible stopping of queued/blocked target threads and repairs `thread_queue_remove()` traversal. The patch is applied reproducibly by `scripts/apply-runtime-patches.sh`.
