@@ -32,8 +32,8 @@ Status: **In progress**
 - [ ] Identify RSP microcode usage
 - [ ] Identify libultra dependencies used by the game
 - [ ] Create initial N64Recomp config
-- [ ] Produce first generated native code
-- [ ] Document unsupported instructions/runtime calls
+- [x] Produce first generated native code
+- [x] Document initial unsupported CPU/RSP boundary
 
 Exit criterion:
 
