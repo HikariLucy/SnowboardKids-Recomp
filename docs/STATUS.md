@@ -566,3 +566,116 @@ This confirms the flicker was caused by an incompatible presentation/buffering a
 The diagnostic launcher keeps `SBK_PRESENT_MODE` overrides available for future comparison, but `console` is now the validated default for SBK1.
 
 The in-game/frontend Options UI is also reachable, confirming that the RecompFrontend configuration modal is operational in the native port.
+
+
+## Current integration snapshot — 2026-09-23
+
+The project is now in a playable native-port state. Earlier sections in this file remain historical implementation notes; this section describes the current frontier.
+
+### Playability / frontend
+
+Validated:
+
+- native N64ModernRuntime boot;
+- RT64/Vulkan rendering;
+- RecompFrontend configuration UI;
+- keyboard input;
+- audible music/SFX;
+- menu progression;
+- Controller Pak warning flow;
+- character/course selection;
+- full race completion;
+- Options UI;
+- Mods UI.
+
+The severe gameplay flicker was eliminated by using `PresentationMode::Console`. A shutdown-time message-queue backtrace remains tracked separately from gameplay stability.
+
+### HD / 4K rendering
+
+Validated on `feat/graphics-resolution-presets` at:
+
+```text
+d6a5f60744e29f2e3fe7b4b36d3933ec55e5d202
+feat(graphics): add HD resolution presets and frontend fixes
+```
+
+Presets:
+
+```text
+Original          1x    320x240
+480p              2x    640x480
+720p-class        3x    960x720
+1080p-class       4.5x  1440x1080
+1440p-class       6x    1920x1440
+2160p/4K-class    9x    2880x2160
+Auto              window-dependent integer scaling
+```
+
+The Mods crash found during frontend validation was fixed by assigning the stable SBK1 mod ID `snowboardkids` and updating RecompFrontend before configuration/game startup.
+
+### Native savestate research
+
+#### P1 — Serializable continuations: PASS
+
+Validated fresh-process restoration, guest registers/RDRAM equivalence, exactly-once resume, live locals, stable continuation IDs and both FR modes.
+
+#### P1.5 — Continuation generalization/schema: PASS
+
+Validated audit/schema tests, fresh-process restore, sanitizer flow tests and cross-binary snapshot exchange. Full-game continuation integration remains pending.
+
+#### P2 — Runtime quiescence: PASS
+
+Validated state machine:
+
+```text
+Idle -> Requested -> ParkGame -> CloseVI -> DrainDevices -> Frozen -> Resume -> Idle
+```
+
+Measured coverage:
+
+- 600 synthetic coordinator cycles;
+- 41 actual runtime-kernel cycles;
+- 660 live RT64/Vulkan gameplay cycles;
+- 0 timeouts;
+- 0 deadlocks;
+- 0 failed Frozen-state audits.
+
+The runtime-kernel test held freezes for 60 ms, longer than the 40 ms guest timer deadline, and exercised a sender blocked on a full message queue. The guest transcript matched the unfrozen baseline.
+
+The live Frozen-state audit verified 8 MiB RDRAM, logical time and queued SDL audio remained unchanged across the freeze boundary.
+
+The stronger renderer drain exposed a Plume/Vulkan fence lifecycle issue: Plume resets a fence after waiting, so re-waiting a worker-owned fence can hang. The validated approach uses fresh queue markers with private fences instead of reusing worker fences or calling global `vkDeviceWaitIdle`.
+
+One P2 documentation item remains to reconcile before P3: the implementation summary names three RT64 GPU queues while a validation summary reports four fence acknowledgements. The actual participant mapping must be documented explicitly.
+
+### Savestate phase ownership
+
+```text
+P1    Serializable continuations              PASS
+P1.5  Continuation generalization/schema      PASS
+P2    Runtime quiescence                      PASS
+P3    RT64 semantic graphics export/import    NEXT
+P4    Complete in-memory save/load            PENDING
+P5    Audio/timing restoration                PENDING
+P6    .sbks persistence                       PENDING
+P7    F5/F8 quick-save/load UX                PENDING
+```
+
+Scope correction: `.sbks` persistence belongs to **P6**, not P3.
+
+### Mods status
+
+The frontend/runtime mod infrastructure is present and the Mods tab works, but full SBK1 code-mod support has not yet been proven end-to-end.
+
+- Mods UI: validated;
+- stable SBK1 `mod_game_id`: validated;
+- SBK1 mod template: pending;
+- exports/hooks/events audit: pending;
+- first real SBK1 code mod: pending;
+- texture-pack validation: pending.
+
+### Current technical frontier
+
+**P3 — RT64 semantic renderer state export/import** is the next high-risk task.
+
+The goal is to export persistent N64 graphics state and GPU-authoritative framebuffer/depth contents at the proven P2 Frozen boundary, reconstruct them into fresh renderer resources, present the restored image without advancing guest time, and resume without reintroducing the flicker regression.
