@@ -307,3 +307,42 @@ recompui::controls_page
 ```
 
 `window` and `supported_games` are now exposed as program-owned globals, matching RecompFrontend's expected contract. The `controls_page` failure was static archive ordering: `recompinput` references UI state from `recompui`, while `recompui` also references input code. The boot link now re-scans `recompui` after `recompinput`.
+
+
+## First graphical window — PASS
+
+On 2026-09-23 `SnowboardKidsRecompiled` linked successfully and launched its first real SDL2/Vulkan window.
+
+Observed runtime milestones:
+
+```text
+ROM validation: Good
+Generated entrypoint: 0x80000400
+Starting N64ModernRuntime...
+SDL video driver: x11
+SDL/Vulkan window created: 1280x720
+Device Name: NVIDIA GeForce RTX 3060 Laptop GPU
+Device Vendor: 0x10DE
+```
+
+RT64 reached renderer/UI initialization. The process then aborted before `recomp_entrypoint` because RecompFrontend had no registered primary font:
+
+```text
+what(): No primary font was registered with recompui::register_primary_font
+```
+
+This is a frontend asset/theme boundary, not a renderer, ROM, or recompiled-game failure.
+
+Resolution in progress/completed in source:
+
+- pin shared `snowboardkids-recomp-theme` at `0cb9a83a263607fbc8ab6176a758a00726e237cc`;
+- call `snowboardkids::theme::apply()` before renderer startup;
+- set RecompFrontend program name/id;
+- package the theme's fonts, promptfont, icons and `recomp.rcss` beside the executable;
+- run the executable from its build directory so RecompFrontend's Linux relative asset lookup resolves correctly.
+
+Next success marker remains:
+
+```text
+>>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
+```
