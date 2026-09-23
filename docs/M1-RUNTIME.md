@@ -354,3 +354,37 @@ void recomp_run_ui_callbacks(uint8_t* rdram, recomp_context* ctx);
 ```
 
 No SBK2 game-specific patch behavior is imported. This is only the ABI contract RecompFrontend requires to compile.
+
+
+### Fourth renderer-stack blocker: SDL/Vulkan window ABI
+
+After the project-owned UI ABI headers were added, the renderer/frontend build reached the final RecompFrontend source file:
+
+```text
+[608/609] recompui/src/renderer/rt64_render_context.cpp
+```
+
+The compile failed assigning:
+
+```cpp
+appCore.window = window_handle;
+```
+
+because:
+
+- N64ModernRuntime defines Linux `WindowHandle` as `SDL_Window*`;
+- Plume defines `RenderWindow` as `SDL_Window*` only when `PLUME_SDL_VULKAN_ENABLED` is defined;
+- otherwise, on Linux, Plume falls back to an X11 `RenderWindow` struct.
+
+RT64's own CMake enables the SDL/Vulkan macro inside RT64's directory scope, but that definition does not automatically propagate to the sibling RecompFrontend directory.
+
+The working Snowboard Kids 2 root build explicitly defines:
+
+```cmake
+PLUME_SDL_VULKAN_ENABLED
+RT64_SDL_WINDOW_VULKAN
+```
+
+on Linux before building RecompFrontend.
+
+SnowboardKids-Recomp now does the same, so both runtime and frontend agree that the window ABI is `SDL_Window*`.
