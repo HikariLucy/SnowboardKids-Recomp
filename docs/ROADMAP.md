@@ -29,8 +29,10 @@ Status: **In progress**
 - [ ] Inspect game entry point and memory layout
 - [ ] Determine required symbol/function mapping
 - [ ] Identify overlays or relocatable code
-- [ ] Identify RSP microcode usage
+- [x] Identify RSP microcode usage
 - [ ] Identify libultra dependencies used by the game
+- [x] Generate audio RSP translation
+- [ ] Validate audio RSP indirect jump-table targets
 - [ ] Create initial N64Recomp config
 - [x] Produce first generated native code
 - [x] Document initial unsupported CPU/RSP boundary
