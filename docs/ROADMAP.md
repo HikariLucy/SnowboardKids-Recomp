@@ -149,6 +149,9 @@ Enhancements must remain separable from compatibility fixes so original behavior
 ### Current stability / UX backlog
 
 - [ ] Capture symbolic backtrace for gameplay crash
-- [ ] Diagnose and eliminate visible frame flicker
+- [x] Diagnose and eliminate visible frame flicker
 - [ ] Validate Xbox controller path through SDL GameController
 - [ ] Expose user-selectable/remappable controls
+
+
+- [x] RecompFrontend options UI reachable
