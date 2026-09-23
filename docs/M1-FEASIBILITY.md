@@ -209,3 +209,26 @@ M1 is complete when:
 4. all blockers to constructing the first runtime executable are documented.
 
 The next milestone, M2, begins with native runtime integration and first boot.
+
+
+## M1.3 first CPU recompilation attempt
+
+The first full CPU translation reached the game entrypoint and then failed on:
+
+```text
+[Info] Indirect tail call in recomp_entrypoint
+Unhandled cop0 register in mfc0: 11
+Error in recompiling aspMainTextStart, clearing output file
+Error recompiling aspMainTextStart
+```
+
+This is not a normal game-CPU function failure. `aspMainTextStart` is the embedded audio RSP microcode. N64Recomp was incorrectly attempting to interpret RSP instructions as CPU instructions because the matching ELF exposes the microcode blob as an executable symbol.
+
+Resolution:
+
+- explicitly ignore `aspMainTextStart` in the CPU recompilation config;
+- explicitly ignore `gspF3DLX_fifoTextStart` for the same reason;
+- keep `rspbootTextStart` under N64Recomp's built-in ignored microcode handling;
+- process the required RSP microcode later with `RSPRecomp`.
+
+The `cop0 register 11` message is therefore expected from decoding the wrong ISA for that blob, not evidence that Snowboard Kids requires unsupported CPU COP0 behavior at this point.
