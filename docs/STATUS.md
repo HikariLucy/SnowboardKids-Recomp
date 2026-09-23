@@ -196,3 +196,6 @@ rm -rf RecompiledFuncs build-native-core
 bash scripts/run-recompiler.sh
 bash scripts/build-native-core.sh
 ```
+
+
+RSP host compile currently requires SSSE3 + SSE4.1 on x86-64 because the pinned N64ModernRuntime vector path uses those intrinsics. The project CMake now enables those flags only for `SnowboardKidsRsp`.
