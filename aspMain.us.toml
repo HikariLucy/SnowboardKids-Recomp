@@ -1,0 +1,24 @@
+# Snowboard Kids (USA) audio RSP microcode.
+#
+# Verified from cdlewis/snowboardkids-decomp:
+#   aspMain ROM start: 0xB1AA0
+#   next RSP block:    0xB28C0
+#   text size:         0xE20
+#
+# RSP audio microcode is loaded at the conventional ABI IMEM address 0x1080.
+# The full address form below matches N64Recomp/RSPRecomp conventions and the
+# working Snowboard Kids 2 recomp reference.
+#
+# We intentionally start with no hand-supplied indirect branch targets.
+# RSPRecomp can generate the translation without them; any missing jump-table
+# targets will be identified and verified separately rather than copied blindly
+# from Snowboard Kids 2.
+
+text_offset = 0xB1AA0
+text_size = 0xE20
+text_address = 0x04001080
+rom_file_path = "../snowboardkids.z64"
+output_file_path = "rsp/aspMain.cpp"
+output_function_name = "aspMain"
+
+extra_indirect_branch_targets = []
