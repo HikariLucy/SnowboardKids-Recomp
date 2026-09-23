@@ -25,4 +25,9 @@ ignored = [
     "aspMainTextStart",
     "gspF3DLX_fifoTextStart",
 ]
-renamed = []
+renamed = [
+    # Snowboard Kids has an N64 function literally named "main". Clang treats
+    # that identifier specially in hosted C and rejects its recomp signature.
+    # N64Recomp appends "_recomp" consistently to declarations and callsites.
+    "main",
+]
