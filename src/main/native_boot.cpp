@@ -294,7 +294,18 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         return false;
     }
 
-    return recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
+    const bool ok = recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
+
+    if (controller_num == 0) {
+        static uint16_t previous_buttons = 0;
+        if (*buttons != previous_buttons) {
+            std::printf("Player 1 N64 buttons: 0x%04X\n", *buttons);
+            std::fflush(stdout);
+            previous_buttons = *buttons;
+        }
+    }
+
+    return ok;
 }
 
 void set_rumble(int controller_num, bool on) {
