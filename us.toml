@@ -17,6 +17,14 @@ entrypoint = 0x80000400
 elf_path = "../snowboardkids-decomp/build/snowboardkids.elf"
 output_func_path = "RecompiledFuncs"
 
+# Static callback used by sprintf/_Printf. The matching ELF does not expose
+# this local function to N64Recomp's runtime section table, but the original
+# game passes its address indirectly. Register it explicitly so
+# get_function(0x800A3500) can resolve it when race/menu text is formatted.
+manual_funcs = [
+    { name = "sprintf_text_0000", section = ".main", vram = 0x800A3500, size = 0x24 },
+]
+
 [patches]
 stubs = []
 ignored = [
