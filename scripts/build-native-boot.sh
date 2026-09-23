@@ -30,5 +30,5 @@ echo "Launching first native boot attempt..."
 echo "Close the SDL window to stop the runtime if it remains open."
 echo
 
-cd "$ROOT_DIR"
-"$BUILD_DIR/SnowboardKidsRecompiled" "$ROM"
+cd "$BUILD_DIR"
+./SnowboardKidsRecompiled "$ROM"
