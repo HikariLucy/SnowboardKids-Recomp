@@ -302,3 +302,29 @@ endif()
 ```
 
 This populates the expected include directory (normally `/usr/include/SDL2`) for RecompFrontend without hard-coding a distro-specific path.
+
+
+### Second renderer-stack blocker: DXC scope
+
+After SDL2 propagation was fixed, the renderer/frontend build advanced from the first RecompFrontend files to more than 500 of 609 build steps. RT64 itself compiled successfully far into its source tree.
+
+The next failure occurred while generating RecompFrontend SPIR-V shaders:
+
+```text
+Generating shaders/InterfaceVS.hlsl.spv
+/bin/sh: .../InterfaceVS.hlsl: Permission denied
+```
+
+The generated command attempted to execute the HLSL source file directly. This means the RT64 `build_vertex_shader` / `build_pixel_shader` helpers were visible, but their `DXC` variable was empty in RecompFrontend's CMake scope.
+
+RT64 defines `DXC` and shader option variables inside the RT64 subdirectory. CMake directory scopes do not propagate those values back to the parent. The working Snowboard Kids 2 build explicitly re-declares the DXC command/options in the root project before adding RecompFrontend.
+
+SnowboardKids-Recomp now mirrors that arrangement, using the pinned RT64 DXC binaries for each host architecture.
+
+Expected Linux x86-64 shader compiler:
+
+```text
+.deps-renderer/rt64/src/contrib/dxc/bin/x64/dxc-linux
+```
+
+with its matching `LD_LIBRARY_PATH`.
