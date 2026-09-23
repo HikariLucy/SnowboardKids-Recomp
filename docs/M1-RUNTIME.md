@@ -571,3 +571,50 @@ The next marker remains:
 ```text
 >>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
 ```
+
+
+### M1.5 exit criterion — reached
+
+The diagnostic boot reached:
+
+```text
+>>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
+<<< SNOWBOARD KIDS RECOMP_ENTRYPOINT RETURNED
+```
+
+and subsequently requested the game's real 22050 Hz audio rate.
+
+This proves that the verified ROM, generated code tables, runtime heap, N64ModernRuntime scheduler startup, RT64 renderer, and translated entrypoint are all connected sufficiently to execute original game logic natively.
+
+### First post-entry blocker: stopping another N64 thread
+
+The next abort occurred in the pinned runtime:
+
+```text
+ultramodern/src/threads.cpp:
+void osStopThread(...): Assertion `false' failed
+```
+
+The matching SBK1 decomp confirms Snowboard Kids intentionally pauses `gAudioThread` from another thread while mutating shared sound state, then restarts it.
+
+Original libultra behavior for a runnable or waiting target thread is to:
+
+1. mark it stopped;
+2. remove it from its current scheduler/message queue;
+3. leave it suspended until `osStartThread()` requeues it.
+
+Pinned N64ModernRuntime had only implemented self-stop. The project therefore carries:
+
+```text
+patches/n64modernruntime-osstopthread.patch
+scripts/apply-runtime-patches.sh
+```
+
+The patch:
+
+- supports stopping non-current `QUEUED` or `BLOCKED` N64 threads;
+- marks self-stopped threads as `STOPPED`;
+- fixes `thread_queue_remove()` so it traverses the actual linked list instead of repeatedly checking only the queue head;
+- clears the removed thread's queue/next links.
+
+The native boot runner verifies the exact pinned runtime revision and applies the patch idempotently before compiling.
