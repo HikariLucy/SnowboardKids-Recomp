@@ -15,6 +15,8 @@ if [[ ! -d "$ROOT_DIR/.deps-renderer/recomp-theme/.git" ]]; then
     bash "$ROOT_DIR/scripts/bootstrap-renderer-stack.sh"
 fi
 
+bash "$ROOT_DIR/scripts/apply-runtime-patches.sh"
+
 cmake \
     -S "$ROOT_DIR" \
     -B "$BUILD_DIR" \
