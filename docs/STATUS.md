@@ -355,3 +355,10 @@ Configurations have not been loaded. Call recompui::config::finalize() first.
 ```
 
 The diagnostic boot now initializes RecompFrontend's standard General, Graphics, Controls, Sound and Mods tabs and calls `recompui::config::finalize()` before starting N64ModernRuntime.
+
+
+The next graphical boot passed frontend configuration, font loading and RT64 initialization, then reached the runtime's initial 48 kHz audio setup before a segmentation fault. The generated game entrypoint trace had not fired yet.
+
+Root-cause analysis of pinned N64ModernRuntime identified an initialization race in the diagnostic launcher: it called `recomp::start_game()` before `recomp::start()`. The VI thread therefore observed the game as already running and skipped its dummy VI initialization, leaving the first `ViState::mode` null before `update_vi()`.
+
+The diagnostic boot now leaves the game stopped while the runtime initializes. Its first VI callback fires only after the dummy VI mode/framebuffer has been seeded, then calls `recomp::start_game()`. This should wake the game thread at a valid video state and allow the generated entrypoint to run.
