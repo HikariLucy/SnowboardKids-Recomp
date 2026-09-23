@@ -487,3 +487,30 @@ manual_funcs = [
 ```
 
 `build-native-boot.sh` now regenerates N64Recomp output before compiling so new manual indirect targets are incorporated automatically.
+
+
+## First playable race — PASS
+
+On 2026-09-23 the native port reached a race and was actively playable.
+
+Validated during the run:
+
+- startup and menu progression;
+- Controller Pak warning flow;
+- character/player selection;
+- course/race loading;
+- player movement and gameplay input;
+- audible music/SFX through SDL audio;
+- native RT64/Vulkan rendering during active gameplay.
+
+The remaining visible rendering issue is persistent screen flicker, though the user observed that the flicker becomes less pronounced over time.
+
+After approximately two minutes of active play, the process terminated with a raw segmentation fault and no runtime assertion or function-address diagnostic. This is now the primary stability blocker.
+
+The diagnostic executable now installs Linux SIGSEGV/SIGABRT handlers, preserves frame pointers, and links with `-rdynamic` so the next crash prints a symbolic backtrace directly to the terminal. Temporary per-button logging has been removed now that input delivery is verified.
+
+Controller UX is deferred until baseline stability improves. Planned follow-up work includes:
+
+- explicit Xbox/SDL GameController validation;
+- user-facing input remapping through RecompFrontend;
+- cleaner N64-to-modern-controller labels/presets.
