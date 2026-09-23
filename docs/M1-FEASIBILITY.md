@@ -287,3 +287,39 @@ Expected output:
 ```text
 rsp/aspMain.cpp
 ```
+
+
+## M1.4 indirect jump table verified
+
+**Status: VERIFIED (2026-09-23)**
+
+The candidate command table was extracted directly from the verified Snowboard Kids USA ROM:
+
+```text
+aspMainDataStart = ROM 0xE2B00
+dispatcher table = data + 0x10 = ROM 0xE2B10
+entries          = 16 x big-endian u16
+valid targets    = 16/16
+unique targets   = 16/16
+```
+
+Verified target list:
+
+```text
+0x1118 0x1470 0x11DC 0x1B38
+0x1214 0x187C 0x1254 0x12D0
+0x12EC 0x1328 0x140C 0x1294
+0x1E24 0x138C 0x170C 0x144C
+```
+
+These values match the Snowboard Kids 2 RSP configuration exactly. This is no longer being treated as copied reference data: the SBK1 ROM independently contains the same 16-entry table at the address selected by its own dispatcher.
+
+Therefore these targets are now included in `aspMain.us.toml` as `extra_indirect_branch_targets`.
+
+Regenerate with:
+
+```bash
+bash scripts/run-rsp-recompiler.sh
+```
+
+This closes the static-analysis portion of M1.4. Runtime execution will remain the final behavioral validation.
