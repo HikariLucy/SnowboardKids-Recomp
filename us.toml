@@ -19,5 +19,10 @@ output_func_path = "RecompiledFuncs"
 
 [patches]
 stubs = []
-ignored = []
+ignored = [
+    # RSP microcode is not CPU code. These blocks are handled separately by
+    # RSPRecomp/runtime integration.
+    "aspMainTextStart",
+    "gspF3DLX_fifoTextStart",
+]
 renamed = []
