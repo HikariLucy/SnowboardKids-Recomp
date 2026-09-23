@@ -9,10 +9,16 @@
 # The full address form below matches N64Recomp/RSPRecomp conventions and the
 # working Snowboard Kids 2 recomp reference.
 #
-# We intentionally start with no hand-supplied indirect branch targets.
-# RSPRecomp can generate the translation without them; any missing jump-table
-# targets will be identified and verified separately rather than copied blindly
-# from Snowboard Kids 2.
+# The 16 indirect branch targets below were verified directly from the
+# Snowboard Kids USA ROM. aspMain's dispatcher executes:
+#
+#   lh  $2, 0x10($2)
+#   jr  $2
+#
+# and the 16 big-endian halfwords at aspMainDataStart + 0x10 (ROM 0xE2B10)
+# all resolve inside aspMain's IMEM text range. They happen to match the
+# Snowboard Kids 2 target list exactly, but are included here because SBK1's
+# own ROM independently verifies them.
 
 text_offset = 0xB1AA0
 text_size = 0xE20
@@ -21,4 +27,13 @@ rom_file_path = "../snowboardkids.z64"
 output_file_path = "rsp/aspMain.cpp"
 output_function_name = "aspMain"
 
-extra_indirect_branch_targets = []
+extra_indirect_branch_targets = [
+    0x1118, 0x1470,
+    0x11DC, 0x1B38,
+    0x1214, 0x187C,
+    0x1254, 0x12D0,
+    0x12EC, 0x1328,
+    0x140C, 0x1294,
+    0x1E24, 0x138C,
+    0x170C, 0x144C,
+]
