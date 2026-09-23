@@ -232,3 +232,58 @@ Resolution:
 - process the required RSP microcode later with `RSPRecomp`.
 
 The `cop0 register 11` message is therefore expected from decoding the wrong ISA for that blob, not evidence that Snowboard Kids requires unsupported CPU COP0 behavior at this point.
+
+
+## M1.3 successful CPU translation
+
+**Status: COMPLETE (2026-09-23)**
+
+After excluding the embedded RSP microcode symbols from the CPU path, N64Recomp completed successfully:
+
+```text
+Function count: 5124
+Working dir: .../SnowboardKids-Recomp
+[Info] Indirect tail call in recomp_entrypoint
+```
+
+Generated output:
+
+```text
+RecompiledFuncs/
+43 files
+~16 MiB
+```
+
+The `Indirect tail call in recomp_entrypoint` message is informational and did not abort generation.
+
+This confirms the first complete static CPU translation of the Snowboard Kids matching ELF.
+
+## M1.4 audio RSP strategy
+
+Snowboard Kids contains `aspMain` audio microcode at ROM `0xB1AA0`, with the next RSP text block beginning at `0xB28C0`. Therefore its text size is exactly `0xE20`.
+
+Initial RSPRecomp parameters:
+
+```text
+text_offset  = 0xB1AA0
+text_size    = 0xE20
+text_address = 0x04001080
+```
+
+The IMEM address follows the standard N64 audio-task layout and matches the working Snowboard Kids 2 recomp architecture.
+
+Important correction: the graphics F3DLX microcode is **not** planned for static RSP recompilation. The working Snowboard Kids 2 port compiles `rsp/aspMain.cpp` but leaves graphics microcode to the modern runtime/RT64 graphics path.
+
+We intentionally start with an empty `extra_indirect_branch_targets` list. Snowboard Kids 2 has a known game-specific list, but identical size alone is not sufficient evidence that Snowboard Kids 1 uses the exact same jump table. Any required targets will be verified before being added.
+
+Run:
+
+```bash
+bash scripts/run-rsp-recompiler.sh
+```
+
+Expected output:
+
+```text
+rsp/aspMain.cpp
+```
