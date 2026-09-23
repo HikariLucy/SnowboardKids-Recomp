@@ -139,3 +139,39 @@ python3 scripts/inspect-rsp-indirects.py
 ```
 
 After indirect control flow is understood, M1.5 moves to N64ModernRuntime + RT64 integration.
+
+
+## Audio RSP indirect-target investigation
+
+The generated SBK1 `aspMain.cpp` contains:
+
+```text
+4 indirect jump sites
+14 automatically discovered case targets
+```
+
+The automatically discovered SBK1 targets have **zero exact overlap** with the 16 explicit targets used by the Snowboard Kids 2 recomp. Several SBK1 targets do, however, align with the SBK2 microcode family after a `-0x14` shift, which is evidence of structural similarity but not identity.
+
+The first SBK1 indirect dispatcher is:
+
+```text
+lh  $2, 0x10($2)
+jr  $2
+```
+
+The matching decomp also confirms:
+
+```text
+aspMainDataStart ROM = 0xE2B00
+ucodeDataSize        = 0x800
+```
+
+Therefore the next check extracts the likely 16-entry audio command jump table directly from the verified SBK1 ROM instead of copying SBK2 addresses.
+
+Run:
+
+```bash
+python3 scripts/extract-audio-jump-table.py
+```
+
+If the 16 halfwords at `aspMainDataStart + 0x10` all resolve inside the SBK1 `aspMain` IMEM text range, they become the candidate `extra_indirect_branch_targets` for runtime validation.
