@@ -83,3 +83,28 @@ Next milestone:
 **M1 — Native recomp feasibility and project skeleton**
 
 The next work should focus on identifying the exact N64Recomp configuration, runtime integration, patches, and symbol inputs required to execute Snowboard Kids natively without depending on an emulator.
+
+
+## N64Recomp feasibility result
+
+On 2026-09-23 the pinned N64Recomp toolchain built successfully at:
+
+```text
+ffb39cdad1da5de07eaaa48bd1db4a89a7986771
+```
+
+The verified matching ELF from the sibling decomp repository was accepted directly by N64Recomp:
+
+```bash
+bash scripts/run-recompiler.sh --dump-context
+```
+
+Result:
+
+```text
+Dumping context
+```
+
+The command exited successfully and generated the function/data context dumps. This completes M1.2 and confirms that a separate hand-authored symbol database is not required for the initial CPU recompilation experiment.
+
+Next: summarize the generated context and run the first full CPU translation into `RecompiledFuncs/`.
