@@ -150,4 +150,5 @@ int main(int argc, char** argv) try {
     }
     out << "default: throw std::runtime_error(\"Unknown function\"); }}\n}\n";
     require(bool(out), "Output failed");
+    return 0;
 } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
