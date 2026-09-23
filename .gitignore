@@ -38,3 +38,5 @@ RecompiledPatches/
 dump.toml
 data_dump.toml
 rsp/*.cpp
+.deps-runtime/
+build-native-core/
