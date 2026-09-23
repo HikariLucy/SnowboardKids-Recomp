@@ -261,3 +261,6 @@ RecompFrontend    e85b912d9df677b04f9358867dd010c8af27ea05
 ```
 
 These are the exact revisions pinned by the working Snowboard Kids 2 recomp reference.
+
+
+Renderer stack configuration reached RT64 Vulkan + RecompFrontend successfully. The first compile stopped in `recompinput` because SDL2's include directory was not propagated from the parent CMake project. SDL2 is installed; the root build now resolves it with `find_package(SDL2 REQUIRED)` before adding RecompFrontend, matching the working SBK2 build order.
