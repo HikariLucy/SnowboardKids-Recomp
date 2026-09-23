@@ -10,6 +10,8 @@
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
 #include "recompui/renderer.h"
+#include "recompui/program_config.h"
+#include "recomp_theme.h"
 #include "ultramodern/ultramodern.hpp"
 
 namespace sbk {
@@ -184,7 +186,7 @@ int main(int argc, char** argv) {
 
     const std::filesystem::path rom_path = argv[1];
     const std::filesystem::path runtime_dir =
-        std::filesystem::current_path() / "build-renderer-stack" / "runtime-data";
+        std::filesystem::current_path() / "runtime-data";
 
     std::error_code ec;
     std::filesystem::create_directories(runtime_dir, ec);
@@ -192,6 +194,10 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "Failed to create runtime data directory: %s\n", ec.message().c_str());
         return EXIT_FAILURE;
     }
+
+    recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
+    recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
+    snowboardkids::theme::apply();
 
     recomp::register_config_path(runtime_dir);
 
