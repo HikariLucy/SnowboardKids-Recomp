@@ -273,3 +273,26 @@ Renderer stack advanced through DXC shader generation into RecompFrontend UI com
 
 
 Renderer stack reached 608/609 build steps. The last compile blocker was a Linux window ABI mismatch: N64ModernRuntime used `SDL_Window*`, while RecompFrontend saw Plume's X11 `RenderWindow` because the SDL/Vulkan macro was scoped only to RT64. The root build now propagates `PLUME_SDL_VULKAN_ENABLED` and `RT64_SDL_WINDOW_VULKAN` to the frontend, matching the working SBK2 Linux configuration.
+
+
+## Renderer/frontend compile validation — PASS
+
+On 2026-09-23 the pinned RT64 + RecompFrontend stack completed all 609 build steps successfully.
+
+Observed result:
+
+```text
+[609/609] Linking CXX static library RecompFrontend/recompui/librecompui.a
+Renderer/frontend compile validation passed.
+```
+
+This closes the isolated renderer/frontend dependency validation. The Linux build now has working compile-time integration for:
+
+- SDL2
+- Vulkan/Plume
+- RT64
+- DXC -> SPIR-V shader generation
+- RecompFrontend input/UI
+- N64ModernRuntime window ABI
+
+Next: build and run `SnowboardKidsRecompiled`, a minimal graphical boot executable that registers generated overlay tables, validates the local ROM, opens an SDL/Vulkan window, starts N64ModernRuntime, and traces entry into `recomp_entrypoint`.
