@@ -388,3 +388,51 @@ RT64_SDL_WINDOW_VULKAN
 on Linux before building RecompFrontend.
 
 SnowboardKids-Recomp now does the same, so both runtime and frontend agree that the window ABI is `SDL_Window*`.
+
+
+### Renderer/frontend stack result
+
+**PASS**
+
+The isolated graphics/frontend build completed:
+
+```text
+[609/609] Linking CXX static library RecompFrontend/recompui/librecompui.a
+Renderer/frontend compile validation passed.
+```
+
+The project can now compile the complete pinned RT64/RecompFrontend stack on Linux with SDL2 + Vulkan.
+
+### M1.5b.3 — First graphical native boot
+
+The next executable is intentionally minimal and launcher-free:
+
+```text
+SnowboardKidsRecompiled
+```
+
+It:
+
+1. validates and stores the verified local SBK1 ROM;
+2. registers N64Recomp's generated section/overlay tables;
+3. creates an SDL2 Vulkan window;
+4. wires RT64 through RecompFrontend's renderer context;
+5. routes `M_AUDTASK` to the generated `aspMain`;
+6. supplies bootstrap input/audio callbacks;
+7. calls `recomp::start_game`;
+8. enters N64ModernRuntime;
+9. wraps the generated entrypoint with a terminal trace.
+
+Critical success marker:
+
+```text
+>>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
+```
+
+Reaching that line completes the M1.5 exit criterion even if the game then exposes a new startup blocker.
+
+Run:
+
+```bash
+bash scripts/build-native-boot.sh
+```
