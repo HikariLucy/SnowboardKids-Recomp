@@ -83,14 +83,14 @@ A user can navigate from startup into a race using a modern controller.
 
 ## M5 — First playable race
 
-- [ ] Player movement
-- [ ] Camera
-- [ ] Course geometry
-- [ ] Collision
+- [x] Player movement
+- [x] Camera
+- [x] Course geometry
+- [x] Collision
 - [ ] Items
 - [ ] AI racers
-- [ ] HUD
-- [ ] Music/SFX
+- [x] HUD
+- [x] Music/SFX
 
 Exit criterion:
 
@@ -136,7 +136,7 @@ Enhancements must remain separable from compatibility fixes so original behavior
 - [x] Reach title/menu
 - [x] Wire real keyboard/controller input through RecompFrontend
 - [x] Validate audible SDL output and sustained audio tasks
-- [ ] Reach first playable race
+- [x] Reach first playable race
 
 
 - [ ] Diagnose post-menu termination
@@ -144,3 +144,11 @@ Enhancements must remain separable from compatibility fixes so original behavior
 
 
 - [ ] Resolve indirect callback targets needed for race start
+
+
+### Current stability / UX backlog
+
+- [ ] Capture symbolic backtrace for gameplay crash
+- [ ] Diagnose and eliminate visible frame flicker
+- [ ] Validate Xbox controller path through SDL GameController
+- [ ] Expose user-selectable/remappable controls
