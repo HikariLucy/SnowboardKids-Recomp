@@ -29,3 +29,12 @@ __pycache__/
 # Logs and local diagnostics
 *.log
 logs/
+
+# Recompiler toolchain / generated native code
+.deps/
+build-tools/
+RecompiledFuncs/
+RecompiledPatches/
+dump.toml
+data_dump.toml
+rsp/*.cpp
