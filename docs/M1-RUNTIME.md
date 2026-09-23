@@ -467,3 +467,28 @@ recompui
 ```
 
 so the reverse UI dependency can be resolved without modifying upstream RecompFrontend.
+
+
+### First graphical runtime result: window created
+
+The first native graphical execution successfully passed:
+
+- executable link;
+- ROM validation;
+- generated entrypoint lookup;
+- SDL video initialization;
+- Vulkan window creation;
+- RT64 GPU/device selection.
+
+The process displayed a black 1280x720 Vulkan window and identified the host NVIDIA GPU. It stopped during RecompFrontend UI initialization because no primary font had been registered.
+
+Rather than introducing a distro-specific system font, the project now pins the same shared Snowboard Kids recomp theme used by the working SBK2 reference:
+
+```text
+snowboardkids-recomp-theme
+0cb9a83a263607fbc8ab6176a758a00726e237cc
+```
+
+Its `snowboardkids::theme::apply()` registers `Fredoka.ttf` as the primary font plus the shared Lato fonts. The theme package also contains RecompFrontend's expected `NotoEmoji-Regular.ttf`, `promptfont/promptfont.ttf`, and `recomp.rcss`.
+
+For Linux, those assets are copied next to `SnowboardKidsRecompiled` and the diagnostic runner launches from that directory because RecompFrontend resolves assets relative to the process working directory.
