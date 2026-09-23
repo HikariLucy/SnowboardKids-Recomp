@@ -259,8 +259,13 @@ if(SBK_BUILD_NATIVE_BOOT)
     target_link_libraries(SnowboardKidsRecompiled PRIVATE
         SnowboardKidsCpu
         SnowboardKidsRsp
+        # RecompFrontend's static input/UI archives have a circular dependency:
+        # recompui references recompinput and recompinput references UI state
+        # symbols such as recompui::controls_page. Re-scan recompui after
+        # recompinput so GNU ld can resolve the reverse edge.
         recompui
         recompinput
+        recompui
         librecomp
         ultramodern
         rt64
