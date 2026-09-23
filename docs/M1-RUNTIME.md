@@ -105,3 +105,35 @@ Likely areas include:
 M1.5 is complete when a native Snowboard Kids executable links and begins executing `recomp_entrypoint` through N64ModernRuntime.
 
 M2 begins with stabilizing that first boot.
+
+
+### First native-core blocker: N64 `main` collision
+
+The first host compilation reached Clang successfully but failed because the original game exports an N64 function literally named:
+
+```text
+main
+```
+
+N64Recomp initially emitted:
+
+```c
+void main(uint8_t* rdram, recomp_context* ctx);
+```
+
+In hosted C, Clang reserves `main` as the program entry function and requires the conventional host signature, so it rejected every translation unit that included `funcs.h`.
+
+This is a naming collision, not a CPU translation or runtime ABI failure.
+
+Resolution:
+
+```toml
+[patches]
+renamed = [
+    "main",
+]
+```
+
+N64Recomp's rename mechanism consistently emits this function as `main_recomp` and rewrites references/calls to the renamed symbol.
+
+After pulling this fix, regenerate `RecompiledFuncs/` before rebuilding the native core.
