@@ -55,6 +55,18 @@ target_compile_options(SnowboardKidsRsp PRIVATE
     -Wno-unused-but-set-variable
 )
 
+# N64ModernRuntime's RSP vector implementation selects its x86 SIMD path on
+# x86_64. That implementation uses SSSE3 (_mm_shuffle_epi8) and SSE4.1
+# (_mm_blendv_epi8), so the standalone RSP validation target must enable the
+# same ISA features explicitly. Keep this scoped to x86/x64; ARM64 uses the
+# runtime's sse2neon path instead.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    target_compile_options(SnowboardKidsRsp PRIVATE
+        -mssse3
+        -msse4.1
+    )
+endif()
+
 target_include_directories(SnowboardKidsRsp PRIVATE
     "${N64_RUNTIME_DIR}/librecomp/include"
     "${N64_RUNTIME_DIR}/N64Recomp/include"
