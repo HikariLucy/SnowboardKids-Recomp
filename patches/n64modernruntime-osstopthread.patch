@@ -1,0 +1,70 @@
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 812c556..0000000 100644
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -270,16 +270,33 @@ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(threa
+ }
+ 
+ extern "C" void osStopThread(RDRAM_ARG PTR(OSThread) t_) {
++    // libultra permits stopping either the current thread or another thread
++    // that is runnable/waiting. Snowboard Kids relies on the latter to pause
++    // gAudioThread while mutating shared audio state.
+     if (t_ == NULLPTR) {
+         t_ = thread_self;
+     }
+-    // Check if the thread is stopping itself (arg is null or thread_self).
++
++    OSThread* t = TO_PTR(OSThread, t_);
++
++    // Stopping the currently executing thread suspends it until another
++    // osStartThread() schedules it again.
+     if (t_ == thread_self) {
++        t->state = OSThreadState::STOPPED;
+         ultramodern::run_next_thread_and_wait(PASS_RDRAM1);
++        return;
+     }
+-    else {
+-        assert(false);
++
++    // A different N64 thread cannot be actively executing at the same time
++    // under ultramodern's cooperative scheduler. Runnable and waiting
++    // threads live in a queue; remove them and leave their native host thread
++    // asleep until osStartThread() resumes them.
++    if (t->state == OSThreadState::QUEUED || t->state == OSThreadState::BLOCKED) {
++        if (t->queue != NULLPTR) {
++            ultramodern::thread_queue_remove(PASS_RDRAM t->queue, t_);
++        }
++        t->state = OSThreadState::STOPPED;
+     }
+ }
+ 
+diff --git a/ultramodern/src/threadqueue.cpp b/ultramodern/src/threadqueue.cpp
+index 0000000..0000000 100644
+--- a/ultramodern/src/threadqueue.cpp
++++ b/ultramodern/src/threadqueue.cpp
+@@ -41,17 +41,20 @@ PTR(OSThread) ultramodern::thread_queue_pop(RDRAM_ARG PTR(PTR(OSThread)) queue_
+ 
+ bool ultramodern::thread_queue_remove(RDRAM_ARG PTR(PTR(OSThread)) queue_, PTR(OSThread) t_) {
+     debug_printf("[Thread Queue] Removing thread %d from queue 0x%08X\n", TO_PTR(OSThread, t_)->id, (uintptr_t)queue_);
+ 
+-    PTR(PTR(OSThread)) cur = queue_;
+-    while (cur != NULLPTR) {
+-        PTR(OSThread)* cur_ptr = queue_to_ptr(PASS_RDRAM queue_);
+-        if (*cur_ptr == t_) {
+-            *cur_ptr = TO_PTR(OSThread, *cur_ptr)->next;
++    PTR(OSThread)* cur = queue_to_ptr(PASS_RDRAM queue_);
++    while (*cur != NULLPTR) {
++        if (*cur == t_) {
++            OSThread* removed = TO_PTR(OSThread, *cur);
++            *cur = removed->next;
++            removed->next = NULLPTR;
++            removed->queue = NULLPTR;
+             return true;
+         }
+-        cur = TO_PTR(OSThread, *cur_ptr)->next;
++
++        cur = &TO_PTR(OSThread, *cur)->next;
+     }
+ 
+     return false;
+ }
