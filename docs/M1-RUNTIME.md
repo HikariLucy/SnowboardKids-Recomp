@@ -492,3 +492,41 @@ snowboardkids-recomp-theme
 Its `snowboardkids::theme::apply()` registers `Fredoka.ttf` as the primary font plus the shared Lato fonts. The theme package also contains RecompFrontend's expected `NotoEmoji-Regular.ttf`, `promptfont/promptfont.ttf`, and `recomp.rcss`.
 
 For Linux, those assets are copied next to `SnowboardKidsRecompiled` and the diagnostic runner launches from that directory because RecompFrontend resolves assets relative to the process working directory.
+
+
+### Frontend configuration boundary
+
+With the shared Snowboard Kids theme packaged, the graphical boot successfully loaded the complete frontend font set:
+
+```text
+Noto Emoji
+PromptFont
+Fredoka
+LatoLatin Regular / Italic / Bold / BoldItalic
+```
+
+RecompFrontend then threw:
+
+```text
+Configurations have not been loaded. Call recompui::config::finalize() first.
+```
+
+This occurs because the graphics/UI layer reads standard configuration values during renderer initialization.
+
+For the first-boot executable, game-specific configuration is deliberately deferred. The project now creates the standard frontend tabs:
+
+```text
+General
+Graphics
+Controls
+Sound
+Mods
+```
+
+and then calls:
+
+```cpp
+recompui::config::finalize();
+```
+
+before starting N64ModernRuntime. This mirrors the required initialization ordering from the working SBK2 reference without importing its game-specific options.
