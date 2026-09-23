@@ -230,3 +230,6 @@ The two remaining warnings originate in the pinned N64ModernRuntime RSP implemen
 **M1.5a is complete.**
 
 Next: M1.5b — create the first native runtime executable skeleton and register Snowboard Kids with N64ModernRuntime.
+
+
+Runtime smoke link reached the final executable after compiling all 149 objects. Four ignored libultra/debug symbols remained unresolved; project-local compatibility shims now mirror the pinned runtime's no-Controller-Pak policy and SBK1's no-op `rmonPrintf`.
