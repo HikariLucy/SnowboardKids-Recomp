@@ -52,6 +52,18 @@ std::vector<recomp::GameEntry> supported_games = {
 
 namespace {
 
+void initialize_controls(const std::filesystem::path& runtime_dir) {
+    const std::filesystem::path controls_path = runtime_dir / "controls.json";
+    const bool loaded_existing =
+        recompinput::profiles::load_controls_config(controls_path);
+
+    std::printf(
+        "RecompInput controls: %s (%s)\n",
+        loaded_existing ? "loaded existing config" : "created default bindings",
+        controls_path.string().c_str()
+    );
+}
+
 void init_frontend_config() {
     // Minimal standard RecompFrontend configuration for first boot.
     // Game-specific settings can be added after the native boot path works.
@@ -367,6 +379,7 @@ int main(int argc, char** argv) {
     recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
     recomp::register_config_path(runtime_dir);
     snowboardkids::theme::apply();
+    initialize_controls(runtime_dir);
     init_frontend_config();
 
     const recomp::GameEntry& game = supported_games[0];
