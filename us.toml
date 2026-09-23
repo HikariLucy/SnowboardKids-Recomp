@@ -1,0 +1,23 @@
+# Initial N64Recomp configuration for Snowboard Kids (USA).
+#
+# This intentionally starts from the matching ELF produced by:
+#   cdlewis/snowboardkids-decomp
+#
+# Paths are relative to this file. With the recommended workspace:
+#
+#   ~/proyectos/Recomp/
+#   ├── SnowboardKids-Recomp/
+#   ├── snowboardkids-decomp/
+#   └── snowboardkids.z64
+#
+# the ELF path below points at the verified matching build.
+
+[input]
+entrypoint = 0x80000400
+elf_path = "../snowboardkids-decomp/build/snowboardkids.elf"
+output_func_path = "RecompiledFuncs"
+
+[patches]
+stubs = []
+ignored = []
+renamed = []
