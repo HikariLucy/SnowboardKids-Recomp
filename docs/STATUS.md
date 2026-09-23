@@ -411,3 +411,42 @@ Next focus:
 2. reach title/logo/menu;
 3. replace bootstrap no-input callbacks with RecompFrontend/recompinput input handling;
 4. validate a complete playable path into a race.
+
+
+## Title/menu reached — PASS
+
+After the initial runtime/libultra thread compatibility patch, the native executable progressed beyond the first rendered mountain scene and reached the Snowboard Kids menu.
+
+Observed behavior:
+
+- game progression reached the menu;
+- rendering was visible but flickered/twinkled;
+- there was no audible output;
+- controls appeared inactive;
+- the executable later terminated after reaching the menu.
+
+The missing audio and controls were expected limitations of the diagnostic launcher at this point: its audio callback discarded every sample and its input callback always returned zeroed controls.
+
+The diagnostic launcher now uses the real RecompFrontend/RecompInput path:
+
+- `recompinput::handle_events()`
+- `recompinput::poll_inputs()`
+- `recompinput::profiles::get_n64_input()`
+- `recompinput::set_rumble()`
+
+It also opens a real SDL float stereo audio device at 48 kHz, converts the game's requested sample rate (observed 22050 Hz), performs the N64 stereo channel swap, queues output to SDL, and reports queued frames back to N64ModernRuntime.
+
+Default keyboard mapping includes:
+
+- Enter -> Start
+- Space -> A
+- Left Shift -> B
+- WASD -> analog stick
+- Arrow keys -> C buttons
+- IJKL -> D-pad
+
+Remaining issues after input/audio enablement:
+
+1. determine the exact post-menu termination from terminal output;
+2. diagnose visible frame flicker independently of game progression;
+3. validate sustained audio and interactive menu navigation.
