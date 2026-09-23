@@ -296,3 +296,14 @@ This closes the isolated renderer/frontend dependency validation. The Linux buil
 - N64ModernRuntime window ABI
 
 Next: build and run `SnowboardKidsRecompiled`, a minimal graphical boot executable that registers generated overlay tables, validates the local ROM, opens an SDL/Vulkan window, starts N64ModernRuntime, and traces entry into `recomp_entrypoint`.
+
+
+First graphical boot target compiled all 146 objects and reached the final executable link. The remaining unresolved references were frontend host contracts rather than game/runtime translation failures:
+
+```text
+window
+supported_games
+recompui::controls_page
+```
+
+`window` and `supported_games` are now exposed as program-owned globals, matching RecompFrontend's expected contract. The `controls_page` failure was static archive ordering: `recompinput` references UI state from `recompui`, while `recompui` also references input code. The boot link now re-scans `recompui` after `recompinput`.
