@@ -17,6 +17,9 @@ fi
 
 bash "$ROOT_DIR/scripts/apply-runtime-patches.sh"
 
+echo "Regenerating N64Recomp output..."
+bash "$ROOT_DIR/scripts/run-recompiler.sh"
+
 cmake \
     -S "$ROOT_DIR" \
     -B "$BUILD_DIR" \
