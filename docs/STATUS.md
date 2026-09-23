@@ -199,3 +199,34 @@ bash scripts/build-native-core.sh
 
 
 RSP host compile currently requires SSSE3 + SSE4.1 on x86-64 because the pinned N64ModernRuntime vector path uses those intrinsics. The project CMake now enables those flags only for `SnowboardKidsRsp`.
+
+
+## Native core compile validation — PASS
+
+On 2026-09-23 the generated Snowboard Kids CPU and audio RSP translations both compiled successfully as native host code with Clang 18.1.3.
+
+Observed result:
+
+```text
+[43/43] Linking CXX static library libSnowboardKidsRsp.a
+Native core compile validation passed.
+
+CPU archive:
+build-native-core/libSnowboardKidsCpu.a
+
+RSP archive:
+build-native-core/libSnowboardKidsRsp.a
+```
+
+This confirms:
+
+- the N64Recomp CPU output compiles successfully for x86-64;
+- the RSPRecomp `aspMain.cpp` output compiles successfully for x86-64;
+- the `main -> main_recomp` rename resolved the hosted-C name collision;
+- the RSP SIMD path compiles correctly with SSSE3 + SSE4.1 enabled.
+
+The two remaining warnings originate in the pinned N64ModernRuntime RSP implementation and are non-fatal compiler precedence warnings.
+
+**M1.5a is complete.**
+
+Next: M1.5b — create the first native runtime executable skeleton and register Snowboard Kids with N64ModernRuntime.
