@@ -211,3 +211,41 @@ The entrypoint remains:
 ```
 
 Once the XXH3-64 value and internal name are recorded, the first `recomp::GameEntry` can be created without guessed metadata.
+
+
+### M1.5b.2 — Runtime smoke executable
+
+Verified Snowboard Kids USA runtime metadata:
+
+```text
+XXH3-64       = 0xF384619787B78D4B
+Internal name = SNOWBOARD KIDS
+Game code     = NSKE
+Entrypoint    = 0x80000400
+```
+
+The first native runtime executable deliberately stops before graphics initialization. It validates the integration boundary by:
+
+1. linking the generated CPU and RSP native libraries;
+2. linking N64ModernRuntime;
+3. registering the real `recomp::GameEntry`;
+4. verifying the generated entrypoint address;
+5. passing the verified local ROM through `recomp::select_rom`;
+6. loading N64ModernRuntime's stored normalized ROM copy;
+7. confirming the runtime sees the expected 8 MiB image.
+
+Run:
+
+```bash
+bash scripts/build-runtime-smoke.sh
+```
+
+Expected terminal result:
+
+```text
+ROM validation  : Good
+Runtime ROM load: OK (8388608 bytes)
+Result          : PASS
+```
+
+This is intentionally before RT64/SDL/frontend so any linker or runtime identity issue remains isolated.
