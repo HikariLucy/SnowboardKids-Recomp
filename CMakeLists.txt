@@ -150,6 +150,15 @@ if(SBK_BUILD_RENDERER_STACK)
         "${CMAKE_BINARY_DIR}/N64ModernRuntime-renderer"
     )
 
+    # RecompFrontend's recompinput/recompui CMake files consume the
+    # SDL2_INCLUDE_DIRS variable supplied by FindSDL2. The working SBK2 port
+    # resolves SDL2 in the parent project before adding RecompFrontend.
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+        find_package(SDL2 REQUIRED)
+        message(STATUS "SDL2_FOUND = ${SDL2_FOUND}")
+        message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
+    endif()
+
     set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${N64_RUNTIME_DIR}")
     set(RECOMP_FRONTEND_RT64_PATH "${RT64_DIR}")
 
