@@ -1,10 +1,7 @@
 diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
-index 812c556..0000000 100644
 --- a/ultramodern/src/threads.cpp
 +++ b/ultramodern/src/threads.cpp
-@@ -270,16 +270,33 @@ extern "C" void osCreateThread(RDRAM_ARG PTR(OSThread) t_, OSId id, PTR(threa
- }
- 
+@@ -269,12 +269,29 @@
  extern "C" void osStopThread(RDRAM_ARG PTR(OSThread) t_) {
 +    // libultra permits stopping either the current thread or another thread
 +    // that is runnable/waiting. Snowboard Kids relies on the latter to pause
@@ -37,16 +34,14 @@ index 812c556..0000000 100644
 +        t->state = OSThreadState::STOPPED;
      }
  }
- 
+
 diff --git a/ultramodern/src/threadqueue.cpp b/ultramodern/src/threadqueue.cpp
-index 0000000..0000000 100644
 --- a/ultramodern/src/threadqueue.cpp
 +++ b/ultramodern/src/threadqueue.cpp
-@@ -41,17 +41,20 @@ PTR(OSThread) ultramodern::thread_queue_pop(RDRAM_ARG PTR(PTR(OSThread)) queue_
- 
+@@ -43,15 +43,18 @@
  bool ultramodern::thread_queue_remove(RDRAM_ARG PTR(PTR(OSThread)) queue_, PTR(OSThread) t_) {
      debug_printf("[Thread Queue] Removing thread %d from queue 0x%08X\n", TO_PTR(OSThread, t_)->id, (uintptr_t)queue_);
- 
+
 -    PTR(PTR(OSThread)) cur = queue_;
 -    while (cur != NULLPTR) {
 -        PTR(OSThread)* cur_ptr = queue_to_ptr(PASS_RDRAM queue_);
@@ -65,6 +60,6 @@ index 0000000..0000000 100644
 +
 +        cur = &TO_PTR(OSThread, *cur)->next;
      }
- 
+
      return false;
  }
