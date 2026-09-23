@@ -514,3 +514,34 @@ Controller UX is deferred until baseline stability improves. Planned follow-up w
 - explicit Xbox/SDL GameController validation;
 - user-facing input remapping through RecompFrontend;
 - cleaner N64-to-modern-controller labels/presets.
+
+
+## Presentation-mode flicker investigation
+
+A full race can now be completed with stable audio and gameplay. The symbolic backtrace printed after the session occurred during application shutdown in `osRecvMesg` / message-queue teardown, not during the completed race, so it is tracked separately from gameplay stability.
+
+The remaining major visual issue is persistent screen flicker.
+
+The diagnostic launcher had been forcing:
+
+```text
+PresentationMode::PresentEarly
+```
+
+because the working Snowboard Kids 2 reference uses that mode. RT64's present queue treats PresentEarly specially: it assumes the framebuffer displayed by the VI is also a color framebuffer modified by the current workload, enabling early/interpolated presentation behavior.
+
+Snowboard Kids 1 is not yet proven to satisfy that presentation pattern. The launcher now defaults to the more console-faithful:
+
+```text
+PresentationMode::Console
+```
+
+and exposes an A/B diagnostic override:
+
+```bash
+SBK_PRESENT_MODE=console
+SBK_PRESENT_MODE=skip-buffering
+SBK_PRESENT_MODE=present-early
+```
+
+The selected mode is printed at runtime. If Console eliminates or materially reduces flicker, presentation timing/buffering is confirmed as the cause rather than game logic or shader compilation.
