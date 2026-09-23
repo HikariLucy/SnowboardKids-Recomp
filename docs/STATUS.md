@@ -389,3 +389,25 @@ osStartThread(&gAudioThread);
 while processing audio state. The pinned N64ModernRuntime only implemented `osStopThread` for the current thread and asserted when stopping a different thread.
 
 A project-owned runtime compatibility patch now implements libultra-compatible stopping of queued/blocked target threads and repairs `thread_queue_remove()` traversal. The patch is applied reproducibly by `scripts/apply-runtime-patches.sh`.
+
+
+## First rendered Snowboard Kids frame — PASS
+
+On 2026-09-23 the native port rendered its first visible Snowboard Kids scene through the full host stack.
+
+Observed on the Linux host:
+
+- `SnowboardKidsRecompiled` launched successfully;
+- N64ModernRuntime reached and executed the generated game entrypoint;
+- the game initialized its 22050 Hz audio path;
+- the project-owned libultra thread compatibility patch allowed execution to continue beyond `osStopThread(&gAudioThread)`;
+- RT64/Vulkan produced a visible in-game snowy mountain scene in the SDL window.
+
+This completes the project's first-frame milestone. The screenshot confirms that original game rendering commands are reaching RT64 and producing host GPU output.
+
+Next focus:
+
+1. confirm boot stability beyond the first rendered scene;
+2. reach title/logo/menu;
+3. replace bootstrap no-input callbacks with RecompFrontend/recompinput input handling;
+4. validate a complete playable path into a race.
