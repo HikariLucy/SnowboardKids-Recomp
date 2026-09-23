@@ -175,3 +175,24 @@ python3 scripts/extract-audio-jump-table.py
 ```
 
 If the 16 halfwords at `aspMainDataStart + 0x10` all resolve inside the SBK1 `aspMain` IMEM text range, they become the candidate `extra_indirect_branch_targets` for runtime validation.
+
+
+## Native-core compile attempt
+
+The pinned N64ModernRuntime dependency bootstrap completed successfully at:
+
+```text
+6ccb2e7c2e7f6708257b461097e0aaf03c445e2a
+```
+
+The regenerated RSP output contains 30 indirect-jump cases: the 14 statically discovered targets plus the 16 ROM-verified command-table targets.
+
+The first Clang host compilation failed only on the original game function named `main`. Clang interpreted it as the hosted process entrypoint and rejected the N64 recomp signature. The project now renames that function via N64Recomp's supported `renamed` mechanism.
+
+Next:
+
+```bash
+rm -rf RecompiledFuncs build-native-core
+bash scripts/run-recompiler.sh
+bash scripts/build-native-core.sh
+```
