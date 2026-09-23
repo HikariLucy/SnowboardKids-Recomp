@@ -44,9 +44,10 @@ N64Recomp can process the selected game code and produce a reproducible native b
 ## M2 — Native boot
 
 - [x] Compile generated CPU + RSP as native host libraries
-- [ ] Create native executable skeleton
+- [x] Create native executable skeleton
 - [ ] Initialize modern runtime
-- [ ] Map ROM/data access
+- [ ] Compile RT64 + RecompFrontend stack
+- [x] Map ROM/data access
 - [ ] Implement required patches/hooks
 - [ ] Reach game entry point
 - [ ] Eliminate first startup crashes
