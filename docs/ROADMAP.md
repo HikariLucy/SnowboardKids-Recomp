@@ -49,8 +49,8 @@ N64Recomp can process the selected game code and produce a reproducible native b
 - [x] Compile RT64 + RecompFrontend stack
 - [x] Map ROM/data access
 - [ ] Implement required patches/hooks
-- [ ] Build first graphical native executable
-- [ ] Reach game entry point
+- [x] Build first graphical native executable
+- [x] Reach game entry point
 - [ ] Eliminate first startup crashes
 
 Exit criterion:
