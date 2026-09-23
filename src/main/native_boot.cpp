@@ -20,9 +20,28 @@ extern RspUcodeFunc aspMain;
 extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
 gpr get_entrypoint_address();
 
-namespace {
+void traced_entrypoint(uint8_t* rdram, recomp_context* ctx);
 
-SDL_Window* g_window = nullptr;
+// RecompFrontend expects these program-owned globals.
+// Keep their names and linkage identical to the working frontend contract.
+SDL_Window* window = nullptr;
+
+std::vector<recomp::GameEntry> supported_games = {
+    {
+        .rom_hash = 0xF384619787B78D4BULL,
+        .internal_name = "SNOWBOARD KIDS",
+        .display_name = "Snowboard Kids",
+        .game_id = u8"snowboardkids.n64.us",
+        .mod_game_id = "",
+        .save_type = recomp::SaveType::None,
+        .is_enabled = true,
+        .has_compressed_code = false,
+        .entrypoint_address = get_entrypoint_address(),
+        .entrypoint = traced_entrypoint,
+    },
+};
+
+namespace {
 
 void host_message_box(const char* msg) {
     std::fprintf(stderr, "[runtime] %s\n", msg);
@@ -44,7 +63,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
     constexpr int width = 1280;
     constexpr int height = 720;
 
-    g_window = SDL_CreateWindow(
+    window = SDL_CreateWindow(
         "Snowboard Kids: Recompiled — first boot",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
@@ -53,13 +72,13 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
         SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
     );
 
-    if (g_window == nullptr) {
+    if (window == nullptr) {
         std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
         std::exit(EXIT_FAILURE);
     }
 
     std::printf("SDL/Vulkan window created: %dx%d\n", width, height);
-    return g_window;
+    return window;
 }
 
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
@@ -127,6 +146,8 @@ std::string get_game_thread_name(const OSThread* thread) {
     return "N64-" + std::to_string(thread->id);
 }
 
+ } // namespace
+
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");
     std::fflush(stdout);
@@ -136,6 +157,8 @@ void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     std::puts("<<< SNOWBOARD KIDS RECOMP_ENTRYPOINT RETURNED");
     std::fflush(stdout);
 }
+
+namespace {
 
 const char* validation_error_name(recomp::RomValidationError error) {
     switch (error) {
@@ -172,18 +195,7 @@ int main(int argc, char** argv) {
 
     recomp::register_config_path(runtime_dir);
 
-    const recomp::GameEntry game{
-        .rom_hash = 0xF384619787B78D4BULL,
-        .internal_name = "SNOWBOARD KIDS",
-        .display_name = "Snowboard Kids",
-        .game_id = u8"snowboardkids.n64.us",
-        .mod_game_id = "",
-        .save_type = recomp::SaveType::None,
-        .is_enabled = true,
-        .has_compressed_code = false,
-        .entrypoint_address = get_entrypoint_address(),
-        .entrypoint = traced_entrypoint,
-    };
+    const recomp::GameEntry& game = supported_games[0];
 
     if (!recomp::register_game(game)) {
         std::fprintf(stderr, "Failed to register Snowboard Kids\n");
