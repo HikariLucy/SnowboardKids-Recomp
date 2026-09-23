@@ -157,6 +157,14 @@ if(SBK_BUILD_RENDERER_STACK)
         find_package(SDL2 REQUIRED)
         message(STATUS "SDL2_FOUND = ${SDL2_FOUND}")
         message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
+
+        # N64ModernRuntime exposes SDL_Window* as its Linux WindowHandle.
+        # Plume must use its SDL/Vulkan RenderWindow typedef in every sibling
+        # target that includes RT64 headers, including RecompFrontend.
+        add_compile_definitions(
+            PLUME_SDL_VULKAN_ENABLED
+            RT64_SDL_WINDOW_VULKAN
+        )
     endif()
 
     # RT64 defines its DXC shader compiler variables inside its own
