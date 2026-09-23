@@ -4,6 +4,7 @@
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -111,6 +112,43 @@ void init_frontend_config() {
     recompui::config::finalize();
 
     std::puts("RecompFrontend configuration finalized.");
+}
+
+ultramodern::renderer::PresentationMode selected_presentation_mode() {
+    static const ultramodern::renderer::PresentationMode mode = []() {
+        const char* value = std::getenv("SBK_PRESENT_MODE");
+        if (value == nullptr || std::strcmp(value, "console") == 0) {
+            return ultramodern::renderer::PresentationMode::Console;
+        }
+        if (std::strcmp(value, "skip-buffering") == 0) {
+            return ultramodern::renderer::PresentationMode::SkipBuffering;
+        }
+        if (std::strcmp(value, "present-early") == 0) {
+            return ultramodern::renderer::PresentationMode::PresentEarly;
+        }
+
+        std::fprintf(
+            stderr,
+            "Unknown SBK_PRESENT_MODE='%s'; using console.\n",
+            value
+        );
+        return ultramodern::renderer::PresentationMode::Console;
+    }();
+
+    return mode;
+}
+
+const char* presentation_mode_name(ultramodern::renderer::PresentationMode mode) {
+    switch (mode) {
+        case ultramodern::renderer::PresentationMode::Console:
+            return "console";
+        case ultramodern::renderer::PresentationMode::SkipBuffering:
+            return "skip-buffering";
+        case ultramodern::renderer::PresentationMode::PresentEarly:
+            return "present-early";
+    }
+
+    return "unknown";
 }
 
 void host_message_box(const char* msg) {
@@ -439,10 +477,12 @@ int main(int argc, char** argv) {
     ultramodern::renderer::callbacks_t renderer_callbacks{
         .create_render_context =
             [](uint8_t* rdram, ultramodern::renderer::WindowHandle window_handle, bool developer_mode) {
+                const auto mode = selected_presentation_mode();
+                std::printf("RT64 presentation mode: %s\n", presentation_mode_name(mode));
                 return recompui::renderer::create_render_context(
                     rdram,
                     window_handle,
-                    ultramodern::renderer::PresentationMode::PresentEarly,
+                    mode,
                     developer_mode
                 );
             },
