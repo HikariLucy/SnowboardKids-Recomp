@@ -18,6 +18,9 @@ endif()
 file(GLOB RECOMPILED_CPU_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_SOURCE_DIR}/RecompiledFuncs/*.c"
 )
+file(GLOB RECOMPILED_CPU_CXX_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_SOURCE_DIR}/RecompiledFuncs/*.cpp"
+)
 
 if(NOT RECOMPILED_CPU_SOURCES)
     message(FATAL_ERROR
@@ -31,7 +34,10 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp")
     )
 endif()
 
-add_library(SnowboardKidsCpu STATIC ${RECOMPILED_CPU_SOURCES})
+add_library(SnowboardKidsCpu STATIC
+    ${RECOMPILED_CPU_SOURCES}
+    ${RECOMPILED_CPU_CXX_SOURCES}
+)
 
 target_compile_options(SnowboardKidsCpu PRIVATE
     -fno-strict-aliasing
@@ -78,3 +84,34 @@ add_custom_target(SnowboardKidsNativeCore
 )
 
 message(STATUS "Configured Snowboard Kids native-core compile validation")
+
+
+option(SBK_BUILD_RUNTIME_SMOKE "Build the N64ModernRuntime GameEntry/ROM smoke executable" OFF)
+
+if(SBK_BUILD_RUNTIME_SMOKE)
+    add_subdirectory(
+        "${N64_RUNTIME_DIR}"
+        "${CMAKE_BINARY_DIR}/N64ModernRuntime"
+    )
+
+    add_executable(SnowboardKidsRuntimeSmoke
+        "${CMAKE_SOURCE_DIR}/src/main/runtime_smoke.cpp"
+    )
+
+    target_compile_options(SnowboardKidsRuntimeSmoke PRIVATE
+        -fno-strict-aliasing
+    )
+
+    target_include_directories(SnowboardKidsRuntimeSmoke PRIVATE
+        "${N64_RUNTIME_DIR}/librecomp/include"
+        "${N64_RUNTIME_DIR}/N64Recomp/include"
+        "${N64_RUNTIME_DIR}/ultramodern/include"
+    )
+
+    target_link_libraries(SnowboardKidsRuntimeSmoke PRIVATE
+        SnowboardKidsCpu
+        SnowboardKidsRsp
+        librecomp
+        ultramodern
+    )
+endif()
