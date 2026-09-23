@@ -450,3 +450,40 @@ Remaining issues after input/audio enablement:
 1. determine the exact post-menu termination from terminal output;
 2. diagnose visible frame flicker independently of game progression;
 3. validate sustained audio and interactive menu navigation.
+
+
+## Audible audio and interactive menu — PASS
+
+The native port now produces audible game audio and accepts real keyboard input through RecompFrontend/RecompInput. The user reached the menu, pressed Enter to confirm a player, and advanced toward race start.
+
+Observed host behavior:
+
+- SDL audio output is audible;
+- menu input works;
+- player selection works;
+- rendering still visibly flickers;
+- transition toward race start aborts with:
+
+```text
+Failed to find function at 0x800A3500
+... librecomp/src/overlays.cpp: get_function(...): Assertion `false' failed.
+```
+
+The matching decomp identifies:
+
+```text
+0x800A3500 = sprintf_text_0000
+0x800A3524 = sprintf
+```
+
+The 0x24-byte function at 0x800A3500 is the static output callback used by `sprintf` / `_Printf` (the decompiled source calls it `proutSprintf`). It is passed as a function pointer, so runtime lookup must resolve its original N64 address.
+
+N64Recomp can discover static functions while recompiling, but automatically discovered statics are not added to the runtime `section_functions` table emitted into `recomp_overlays.inl`. The project now declares this callback explicitly as an input manual function:
+
+```toml
+manual_funcs = [
+    { name = "sprintf_text_0000", section = ".main", vram = 0x800A3500, size = 0x24 },
+]
+```
+
+`build-native-boot.sh` now regenerates N64Recomp output before compiling so new manual indirect targets are incorporated automatically.
