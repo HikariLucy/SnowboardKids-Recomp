@@ -530,3 +530,44 @@ recompui::config::finalize();
 ```
 
 before starting N64ModernRuntime. This mirrors the required initialization ordering from the working SBK2 reference without importing its game-specific options.
+
+
+### Pre-entry VI initialization race
+
+After frontend configuration was finalized, the diagnostic executable advanced through RT64 initialization and printed the runtime's initial audio request:
+
+```text
+N64 audio frequency requested: 48000 Hz
+```
+
+It then segfaulted before the traced generated entrypoint.
+
+The pinned N64ModernRuntime startup order is:
+
+```text
+recomp::start()
+  -> game thread
+     -> ultramodern::preinit()
+        -> init_events()
+        -> init_timers()
+        -> init_audio()
+        -> init_thread_cleanup()
+```
+
+The VI thread contains an important pre-game path: while `ultramodern::is_game_started()` is false, it seeds a dummy VI mode and framebuffer before calling `ViState::update_vi()`.
+
+The first diagnostic launcher incorrectly called `recomp::start_game()` before `recomp::start()`. This meant the VI thread saw the game as already running on its very first iteration, skipped `set_dummy_vi()`, and could dereference an uninitialized/null VI mode.
+
+Fix: the launcher now starts N64ModernRuntime with no active game and uses the first VI callback to call `recomp::start_game()`. The callback runs after the first dummy VI state has been initialized and swapped, preserving the runtime's expected startup invariant.
+
+New diagnostic marker:
+
+```text
+First safe VI reached; starting Snowboard Kids...
+```
+
+The next marker remains:
+
+```text
+>>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
+```
