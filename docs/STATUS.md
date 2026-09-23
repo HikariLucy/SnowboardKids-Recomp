@@ -267,3 +267,6 @@ Renderer stack configuration reached RT64 Vulkan + RecompFrontend successfully. 
 
 
 Renderer stack advanced past SDL2 integration to shader generation (536+/609 steps). RecompFrontend then inherited RT64's shader helper functions without RT64's directory-local `DXC` variable, causing HLSL files to be invoked directly. The root CMake now exposes the pinned RT64 DXC command/options before adding RecompFrontend, following the working SBK2 build pattern.
+
+
+Renderer stack advanced through DXC shader generation into RecompFrontend UI compilation (545+/609 steps). The next boundary was RecompFrontend's required game-side UI ABI header. SnowboardKids-Recomp now provides project-owned event structs and the `recomp_run_ui_callbacks` declaration without importing SBK2-specific patch behavior.
