@@ -346,3 +346,12 @@ Next success marker remains:
 ```text
 >>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT
 ```
+
+
+Frontend assets now load successfully during the first graphical boot. The runtime loaded Noto Emoji, PromptFont, Fredoka and all shared Lato faces, then stopped at the next initialization contract:
+
+```text
+Configurations have not been loaded. Call recompui::config::finalize() first.
+```
+
+The diagnostic boot now initializes RecompFrontend's standard General, Graphics, Controls, Sound and Mods tabs and calls `recompui::config::finalize()` before starting N64ModernRuntime.
