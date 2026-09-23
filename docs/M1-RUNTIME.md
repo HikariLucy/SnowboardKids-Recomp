@@ -436,3 +436,34 @@ Run:
 ```bash
 bash scripts/build-native-boot.sh
 ```
+
+
+### First graphical boot linker boundary
+
+The first `SnowboardKidsRecompiled` build compiled all 146 objects and failed only at the final native link.
+
+RecompFrontend expects two globals to be owned by the executable:
+
+```cpp
+SDL_Window* window;
+std::vector<recomp::GameEntry> supported_games;
+```
+
+The initial minimal boot used a private `g_window` and a local `GameEntry`, so those symbols were absent. They are now exported with the expected names.
+
+A third unresolved dependency came from the two static RecompFrontend archives:
+
+```text
+recompui -> recompinput
+recompinput -> recompui::controls_page
+```
+
+GNU ld processes static archives from left to right and does not automatically re-scan an earlier archive. The boot target now links:
+
+```text
+recompui
+recompinput
+recompui
+```
+
+so the reverse UI dependency can be resolved without modifying upstream RecompFrontend.
