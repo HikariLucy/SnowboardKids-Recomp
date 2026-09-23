@@ -220,3 +220,54 @@ if(SBK_BUILD_RENDERER_STACK)
         DEPENDS rt64 recompui recompinput
     )
 endif()
+
+
+option(SBK_BUILD_NATIVE_BOOT "Build the first graphical Snowboard Kids native boot executable" OFF)
+
+if(SBK_BUILD_NATIVE_BOOT)
+    if(NOT SBK_BUILD_RENDERER_STACK)
+        message(FATAL_ERROR "SBK_BUILD_NATIVE_BOOT requires SBK_BUILD_RENDERER_STACK=ON")
+    endif()
+
+    find_package(Threads REQUIRED)
+
+    add_executable(SnowboardKidsRecompiled
+        "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
+    )
+
+    target_compile_options(SnowboardKidsRecompiled PRIVATE
+        -fno-strict-aliasing
+        -fms-extensions
+    )
+
+    target_include_directories(SnowboardKidsRecompiled PRIVATE
+        "${CMAKE_SOURCE_DIR}"
+        "${N64_RUNTIME_DIR}/librecomp/include"
+        "${N64_RUNTIME_DIR}/N64Recomp/include"
+        "${N64_RUNTIME_DIR}/ultramodern/include"
+        "${N64_RUNTIME_DIR}/thirdparty"
+        "${RECOMP_FRONTEND_DIR}/recompui/include"
+        "${RECOMP_FRONTEND_DIR}/recompinput/include"
+        "${RT64_DIR}/src"
+        "${RT64_DIR}/src/contrib"
+        "${CMAKE_BINARY_DIR}/shaders"
+        ${SDL2_INCLUDE_DIRS}
+    )
+
+    target_link_libraries(SnowboardKidsRecompiled PRIVATE
+        SnowboardKidsCpu
+        SnowboardKidsRsp
+        recompui
+        recompinput
+        librecomp
+        ultramodern
+        rt64
+        nfd
+        SDL2::SDL2
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+        atomic
+    )
+endif()
