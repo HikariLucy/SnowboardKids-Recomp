@@ -123,6 +123,7 @@ option(SBK_BUILD_RENDERER_STACK "Build RT64 + RecompFrontend integration depende
 if(SBK_BUILD_RENDERER_STACK)
     set(RT64_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/rt64")
     set(RECOMP_FRONTEND_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/RecompFrontend")
+    set(RECOMP_THEME_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/recomp-theme")
 
     if(NOT EXISTS "${RT64_DIR}/CMakeLists.txt")
         message(FATAL_ERROR
@@ -133,6 +134,12 @@ if(SBK_BUILD_RENDERER_STACK)
     if(NOT EXISTS "${RECOMP_FRONTEND_DIR}/CMakeLists.txt")
         message(FATAL_ERROR
             "RecompFrontend is missing. Run: bash scripts/bootstrap-renderer-stack.sh"
+        )
+    endif()
+
+    if(NOT EXISTS "${RECOMP_THEME_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "Snowboard Kids recomp theme is missing. Run: bash scripts/bootstrap-renderer-stack.sh"
         )
     endif()
 
@@ -216,6 +223,11 @@ if(SBK_BUILD_RENDERER_STACK)
         "${CMAKE_BINARY_DIR}/RecompFrontend"
     )
 
+    add_subdirectory(
+        "${RECOMP_THEME_DIR}"
+        "${CMAKE_BINARY_DIR}/recomp-theme"
+    )
+
     add_custom_target(SnowboardKidsRendererStack
         DEPENDS rt64 recompui recompinput
     )
@@ -235,6 +247,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
+        ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
     target_compile_options(SnowboardKidsRecompiled PRIVATE
@@ -250,6 +263,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${N64_RUNTIME_DIR}/thirdparty"
         "${RECOMP_FRONTEND_DIR}/recompui/include"
         "${RECOMP_FRONTEND_DIR}/recompinput/include"
+        "${SNOWBOARDKIDS_THEME_INCLUDE_DIR}"
         "${RT64_DIR}/src"
         "${RT64_DIR}/src/contrib"
         "${CMAKE_BINARY_DIR}/shaders"
@@ -274,5 +288,14 @@ if(SBK_BUILD_NATIVE_BOOT)
         Threads::Threads
         ${CMAKE_DL_LIBS}
         atomic
+    )
+
+    # RecompFrontend resolves Linux assets relative to the process working
+    # directory. Package the shared Snowboard Kids theme assets next to the
+    # diagnostic executable so fonts, promptfont and recomp.rcss are present.
+    add_custom_command(TARGET SnowboardKidsRecompiled POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
+            "$<TARGET_FILE_DIR:SnowboardKidsRecompiled>/assets"
     )
 endif()
