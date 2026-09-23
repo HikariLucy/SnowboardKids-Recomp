@@ -159,6 +159,47 @@ if(SBK_BUILD_RENDERER_STACK)
         message(STATUS "SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
     endif()
 
+    # RT64 defines its DXC shader compiler variables inside its own
+    # subdirectory scope. RecompFrontend calls RT64's shader helper functions
+    # from a sibling subdirectory, so the parent project must expose the same
+    # DXC command/options before adding RecompFrontend. This mirrors the
+    # working Snowboard Kids 2 build.
+    set(DXC_COMMON_OPTS "-I${RT64_DIR}/src")
+    set(DXC_DXIL_OPTS "-Wno-ignored-attributes")
+    set(DXC_SPV_OPTS "-spirv" "-fspv-target-env=vulkan1.0" "-fvk-use-dx-layout")
+    set(DXC_PS_OPTS "${DXC_COMMON_OPTS}" "-E" "PSMain" "-T" "ps_6_0" "-D" "DYNAMIC_RENDER_PARAMS")
+    set(DXC_VS_OPTS "${DXC_COMMON_OPTS}" "-E" "VSMain" "-T" "vs_6_0" "-D" "DYNAMIC_RENDER_PARAMS" "-fvk-invert-y")
+    set(DXC_CS_OPTS "${DXC_COMMON_OPTS}" "-E" "CSMain" "-T" "cs_6_0")
+    set(DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T" "gs_6_0")
+
+    if(WIN32)
+        set(DXC "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+    elseif(APPLE)
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+            set(DXC
+                "DYLD_LIBRARY_PATH=${RT64_DIR}/src/contrib/dxc/lib/x64"
+                "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc-macos"
+            )
+        else()
+            set(DXC
+                "DYLD_LIBRARY_PATH=${RT64_DIR}/src/contrib/dxc/lib/arm64"
+                "${RT64_DIR}/src/contrib/dxc/bin/arm64/dxc-macos"
+            )
+        endif()
+    else()
+        if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+            set(DXC
+                "LD_LIBRARY_PATH=${RT64_DIR}/src/contrib/dxc/lib/x64"
+                "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc-linux"
+            )
+        else()
+            set(DXC
+                "LD_LIBRARY_PATH=${RT64_DIR}/src/contrib/dxc/lib/arm64"
+                "${RT64_DIR}/src/contrib/dxc/bin/arm64/dxc-linux"
+            )
+        endif()
+    endif()
+
     set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${N64_RUNTIME_DIR}")
     set(RECOMP_FRONTEND_RT64_PATH "${RT64_DIR}")
 
