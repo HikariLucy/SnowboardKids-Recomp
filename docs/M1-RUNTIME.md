@@ -184,3 +184,30 @@ build-native-core/libSnowboardKidsRsp.a
 This is the first point in the project where the translated Snowboard Kids CPU and audio RSP code have both been compiled into native x86-64 machine-code libraries.
 
 The next step is no longer code-generation validation. It is runtime integration.
+
+
+### M1.5b.1 — ROM identity
+
+N64ModernRuntime validates supported ROMs with `XXH3_64bits` after normalizing byte order. This is distinct from the SHA-1 used by the matching decomp baseline.
+
+The first-game runtime entry also needs the ROM's internal header name. Obtain both directly from the verified local dump with:
+
+```bash
+bash scripts/inspect-runtime-rom.sh
+```
+
+The original game uses Controller Pak/PFS flows for its large save and replay data. The decomp exposes a `GameSaveData` slot of `0x78F8` bytes and explicit Controller Pak read/write/menu code, so the runtime's cartridge save medium should start as:
+
+```cpp
+.save_type = recomp::SaveType::None
+```
+
+Controller Pak support is handled through the runtime's PFS path rather than EEPROM/SRAM/FlashRAM.
+
+The entrypoint remains:
+
+```text
+0x80000400
+```
+
+Once the XXH3-64 value and internal name are recorded, the first `recomp::GameEntry` can be created without guessed metadata.
