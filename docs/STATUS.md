@@ -233,3 +233,31 @@ Next: M1.5b — create the first native runtime executable skeleton and register
 
 
 Runtime smoke link reached the final executable after compiling all 149 objects. Four ignored libultra/debug symbols remained unresolved; project-local compatibility shims now mirror the pinned runtime's no-Controller-Pak policy and SBK1's no-op `rmonPrintf`.
+
+
+## Runtime smoke validation — PASS
+
+On 2026-09-23 the first native N64ModernRuntime smoke executable linked and ran successfully.
+
+Observed result:
+
+```text
+GameEntry       : registered
+Internal name   : SNOWBOARD KIDS
+ROM hash        : 0xF384619787B78D4B
+Entrypoint      : 0x80000400
+ROM validation  : Good
+Runtime ROM load: OK (8388608 bytes)
+Result          : PASS
+```
+
+This confirms the generated game code can link into a real N64ModernRuntime executable, the runtime accepts the verified SBK1 ROM, and the complete 8 MiB normalized ROM is loaded successfully.
+
+The next isolated validation is the graphics/frontend dependency stack:
+
+```text
+RT64              6a4166b2cfa952d931a08481d1037da995f28b54
+RecompFrontend    e85b912d9df677b04f9358867dd010c8af27ea05
+```
+
+These are the exact revisions pinned by the working Snowboard Kids 2 recomp reference.
