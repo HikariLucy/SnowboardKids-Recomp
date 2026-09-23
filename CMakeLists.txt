@@ -116,3 +116,49 @@ if(SBK_BUILD_RUNTIME_SMOKE)
         ultramodern
     )
 endif()
+
+
+option(SBK_BUILD_RENDERER_STACK "Build RT64 + RecompFrontend integration dependencies" OFF)
+
+if(SBK_BUILD_RENDERER_STACK)
+    set(RT64_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/rt64")
+    set(RECOMP_FRONTEND_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/RecompFrontend")
+
+    if(NOT EXISTS "${RT64_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "RT64 is missing. Run: bash scripts/bootstrap-renderer-stack.sh"
+        )
+    endif()
+
+    if(NOT EXISTS "${RECOMP_FRONTEND_DIR}/CMakeLists.txt")
+        message(FATAL_ERROR
+            "RecompFrontend is missing. Run: bash scripts/bootstrap-renderer-stack.sh"
+        )
+    endif()
+
+    set(RT64_STATIC TRUE)
+    set(RT64_SDL_WINDOW_VULKAN TRUE)
+    add_compile_definitions(HLSL_CPU)
+
+    add_subdirectory(
+        "${RT64_DIR}"
+        "${CMAKE_BINARY_DIR}/rt64"
+    )
+
+    add_subdirectory(
+        "${N64_RUNTIME_DIR}"
+        "${CMAKE_BINARY_DIR}/N64ModernRuntime-renderer"
+    )
+
+    set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${N64_RUNTIME_DIR}")
+    set(RECOMP_FRONTEND_RT64_PATH "${RT64_DIR}")
+
+    add_subdirectory(
+        "${RECOMP_FRONTEND_DIR}"
+        "${CMAKE_BINARY_DIR}/RecompFrontend"
+    )
+
+    add_custom_target(SnowboardKidsRendererStack
+        DEPENDS rt64 recompui recompinput
+    )
+endif()
