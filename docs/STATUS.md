@@ -270,3 +270,6 @@ Renderer stack advanced past SDL2 integration to shader generation (536+/609 ste
 
 
 Renderer stack advanced through DXC shader generation into RecompFrontend UI compilation (545+/609 steps). The next boundary was RecompFrontend's required game-side UI ABI header. SnowboardKids-Recomp now provides project-owned event structs and the `recomp_run_ui_callbacks` declaration without importing SBK2-specific patch behavior.
+
+
+Renderer stack reached 608/609 build steps. The last compile blocker was a Linux window ABI mismatch: N64ModernRuntime used `SDL_Window*`, while RecompFrontend saw Plume's X11 `RenderWindow` because the SDL/Vulkan macro was scoped only to RT64. The root build now propagates `PLUME_SDL_VULKAN_ENABLED` and `RT64_SDL_WINDOW_VULKAN` to the frontend, matching the working SBK2 Linux configuration.
