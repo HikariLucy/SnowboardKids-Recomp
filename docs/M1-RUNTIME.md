@@ -279,3 +279,26 @@ rmonPrintf_recomp        -> no-op
 ```
 
 These are bootstrap compatibility shims, not the final Controller Pak implementation. Persistent SBK1 save/replay support remains a later PFS task.
+
+
+### First renderer-stack blocker: SDL2 include propagation
+
+The first RT64 + RecompFrontend build configured the Vulkan renderer successfully and reached RecompFrontend compilation, but `recompinput` failed with:
+
+```text
+fatal error: 'SDL.h' file not found
+```
+
+SDL2 itself was installed correctly. The issue was CMake ordering: RecompFrontend's `recompinput` and `recompui` projects consume `${SDL2_INCLUDE_DIRS}`, but the parent SnowboardKids-Recomp project had not called `find_package(SDL2 REQUIRED)` before adding RecompFrontend.
+
+The working Snowboard Kids 2 port resolves SDL2 in the parent CMake project before `add_subdirectory(RecompFrontend)`.
+
+Resolution:
+
+```cmake
+if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+    find_package(SDL2 REQUIRED)
+endif()
+```
+
+This populates the expected include directory (normally `/usr/include/SDL2`) for RecompFrontend without hard-coding a distro-specific path.
