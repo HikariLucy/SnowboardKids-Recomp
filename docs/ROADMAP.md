@@ -133,7 +133,11 @@ Enhancements must remain separable from compatibility fixes so original behavior
 
 ### Current next milestones
 
-- [ ] Reach title/menu reliably
-- [ ] Wire real keyboard/controller input through RecompFrontend
-- [ ] Validate audio task execution beyond startup
+- [x] Reach title/menu
+- [x] Wire real keyboard/controller input through RecompFrontend
+- [ ] Validate audible SDL output and sustained audio tasks
 - [ ] Reach first playable race
+
+
+- [ ] Diagnose post-menu termination
+- [ ] Diagnose visible frame flicker
