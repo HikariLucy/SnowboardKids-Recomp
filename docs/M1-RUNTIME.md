@@ -639,3 +639,28 @@ recompiled SBK1 game code
 This is the first visual proof that the game's original rendering workload is executing through the native recompilation stack rather than merely initializing the host renderer.
 
 The next runtime work is no longer "get a frame"; it is boot progression and interactivity: title/menu progression, stable timing/audio, and real input callbacks.
+
+
+### Race-start indirect callback blocker
+
+With real SDL audio and RecompInput enabled, the port reached the menu, accepted Start/Enter, selected a player, and progressed toward race start.
+
+The next abort is deterministic:
+
+```text
+Failed to find function at 0x800A3500
+```
+
+The matching decomp maps that address to `sprintf_text_0000`, immediately preceding `sprintf` at `0x800A3524`. The corresponding source is the static `proutSprintf` callback passed to `_Printf`.
+
+This is an indirect-function registration issue rather than a missing implementation. N64Recomp's automatically discovered static functions are emitted as compiled code but are not included in the runtime section lookup table. Declaring the callback via `input.manual_funcs` makes it a normal section function and therefore resolvable by `librecomp::get_function()`.
+
+Manual function definition:
+
+```toml
+{ name = "sprintf_text_0000", section = ".main", vram = 0x800A3500, size = 0x24 }
+```
+
+The size is derived from the next known function address, `sprintf = 0x800A3524`.
+
+The native boot runner now regenerates N64Recomp output on each diagnostic build so additional indirect targets can be added reproducibly as they surface.
