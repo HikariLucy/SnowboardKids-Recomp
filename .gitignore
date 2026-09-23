@@ -1,0 +1,31 @@
+# Proprietary game data
+*.z64
+*.n64
+*.v64
+*.rom
+*.bin
+baserom*
+snowboardkids.z64
+
+# Extracted/generated assets
+assets/extracted/
+asset-backups/
+build/
+out/
+dist/
+
+# Tooling and local environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+.cache/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs and local diagnostics
+*.log
+logs/
