@@ -126,6 +126,18 @@ void set_frequency(uint32_t freq) {
 void poll_input() {
 }
 
+void start_game_on_first_vi() {
+    static bool started = false;
+    if (started) {
+        return;
+    }
+
+    started = true;
+    std::puts("First safe VI reached; starting Snowboard Kids...");
+    std::fflush(stdout);
+    recomp::start_game(u8"snowboardkids.n64.us", "");
+}
+
 bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
     if (controller_num != 0) {
         return false;
@@ -274,7 +286,7 @@ int main(int argc, char** argv) {
     };
 
     ultramodern::events::callbacks_t events_callbacks{
-        .vi_callback = nullptr,
+        .vi_callback = start_game_on_first_vi,
         .gfx_init_callback = nullptr,
     };
 
@@ -291,10 +303,10 @@ int main(int argc, char** argv) {
     std::puts("Starting N64ModernRuntime...");
     std::fflush(stdout);
 
-    // Start the game immediately for this diagnostic executable. A launcher
-    // and persistent frontend flow come later.
-    recomp::start_game(game_id, "");
-
+    // Do not call start_game() before the runtime starts. N64ModernRuntime's
+    // VI thread needs one dummy retrace to seed a valid VI mode/framebuffer.
+    // The first VI callback above starts the game immediately after that safe
+    // initialization point.
     recomp::start(
         recomp::Version{0, 0, 1, "-boot"},
         {},
