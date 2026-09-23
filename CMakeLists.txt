@@ -96,6 +96,7 @@ if(SBK_BUILD_RUNTIME_SMOKE)
 
     add_executable(SnowboardKidsRuntimeSmoke
         "${CMAKE_SOURCE_DIR}/src/main/runtime_smoke.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
     )
 
     target_compile_options(SnowboardKidsRuntimeSmoke PRIVATE
