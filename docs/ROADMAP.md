@@ -22,7 +22,7 @@ build/snowboardkids.z64: OK
 
 ## M1 — Recomp feasibility
 
-Status: **Next**
+Status: **In progress**
 
 - [ ] Pin exact upstream decomp commit
 - [ ] Pin exact N64Recomp revision
