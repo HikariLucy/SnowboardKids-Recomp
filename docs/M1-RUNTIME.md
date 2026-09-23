@@ -328,3 +328,29 @@ Expected Linux x86-64 shader compiler:
 ```
 
 with its matching `LD_LIBRARY_PATH`.
+
+
+### Third renderer-stack blocker: game UI ABI header
+
+After DXC scope was fixed, the renderer/frontend build advanced into the final RecompFrontend UI sources (545+/609 steps). It then stopped because RecompFrontend contains a deliberate game-facing include:
+
+```cpp
+#include "../../../../../patches/ui_funcs.h"
+```
+
+This interface supplies the event data layout used when the native frontend queues callbacks into recompiled game code.
+
+SnowboardKids-Recomp now provides a minimal project-owned interface:
+
+```text
+patches/recompui_event_structs.h
+patches/ui_funcs.h
+```
+
+The event enum ordering matches RecompFrontend's `recompui::EventType`, `DragPhase`, and `MenuAction` ordering. The header also declares the runtime callback:
+
+```cpp
+void recomp_run_ui_callbacks(uint8_t* rdram, recomp_context* ctx);
+```
+
+No SBK2 game-specific patch behavior is imported. This is only the ABI contract RecompFrontend requires to compile.
