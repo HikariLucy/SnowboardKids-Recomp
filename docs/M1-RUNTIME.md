@@ -137,3 +137,34 @@ renamed = [
 N64Recomp's rename mechanism consistently emits this function as `main_recomp` and rewrites references/calls to the renamed symbol.
 
 After pulling this fix, regenerate `RecompiledFuncs/` before rebuilding the native core.
+
+
+### Second native-core blocker: RSP SIMD target features
+
+After resolving the original-game `main` symbol collision, all generated CPU translation units advanced through host compilation. The remaining failure was isolated to:
+
+```text
+rsp/aspMain.cpp
+```
+
+N64ModernRuntime selects its SIMD RSP implementation automatically on x86-64. That implementation uses:
+
+```text
+_mm_shuffle_epi8  -> SSSE3
+_mm_blendv_epi8   -> SSE4.1
+```
+
+The standalone `SnowboardKidsRsp` validation target had not enabled those target features, so Clang rejected the always-inline intrinsics.
+
+Resolution:
+
+```cmake
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    target_compile_options(SnowboardKidsRsp PRIVATE
+        -mssse3
+        -msse4.1
+    )
+endif()
+```
+
+The flags are scoped only to the RSP target and only to x86/x64. ARM64 remains on N64ModernRuntime's sse2neon path.
