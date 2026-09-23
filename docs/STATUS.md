@@ -108,3 +108,34 @@ Dumping context
 The command exited successfully and generated the function/data context dumps. This completes M1.2 and confirms that a separate hand-authored symbol database is not required for the initial CPU recompilation experiment.
 
 Next: summarize the generated context and run the first full CPU translation into `RecompiledFuncs/`.
+
+
+## Audio RSP generation
+
+On 2026-09-23 the Snowboard Kids audio RSP microcode was successfully translated with the pinned `RSPRecomp` toolchain.
+
+Command:
+
+```bash
+bash scripts/run-rsp-recompiler.sh
+```
+
+Observed result:
+
+```text
+Generated: rsp/aspMain.cpp
+2241 lines
+~72 KiB
+```
+
+The generated file contains 4 indirect-jump sites and 14 automatically discovered `case` targets.
+
+This completes **RSP code generation**, but not yet runtime validation. Audio microcode can use jump-table targets that are not statically discoverable from linked jumps. The working Snowboard Kids 2 recomp supplies 16 additional indirect targets explicitly; those values are being treated only as comparison evidence, not copied into Snowboard Kids 1 without verification.
+
+Next validation command:
+
+```bash
+python3 scripts/inspect-rsp-indirects.py
+```
+
+After indirect control flow is understood, M1.5 moves to N64ModernRuntime + RT64 integration.
