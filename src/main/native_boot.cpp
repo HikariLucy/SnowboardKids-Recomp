@@ -1,11 +1,17 @@
 #include <algorithm>
 #include <array>
 #include <cinttypes>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <vector>
+
+#if defined(__linux__)
+#include <execinfo.h>
+#include <unistd.h>
+#endif
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
@@ -51,6 +57,31 @@ std::vector<recomp::GameEntry> supported_games = {
 };
 
 namespace {
+
+#if defined(__linux__)
+void crash_signal_handler(int signal_number) {
+    constexpr int max_frames = 64;
+    void* frames[max_frames];
+    const int frame_count = backtrace(frames, max_frames);
+
+    const char header[] = "\n=== SnowboardKidsRecompiled crash backtrace ===\n";
+    write(STDERR_FILENO, header, sizeof(header) - 1);
+    backtrace_symbols_fd(frames, frame_count, STDERR_FILENO);
+
+    const char footer[] = "=== end crash backtrace ===\n";
+    write(STDERR_FILENO, footer, sizeof(footer) - 1);
+
+    _exit(128 + signal_number);
+}
+
+void install_crash_handlers() {
+    std::signal(SIGSEGV, crash_signal_handler);
+    std::signal(SIGABRT, crash_signal_handler);
+}
+#else
+void install_crash_handlers() {
+}
+#endif
 
 void initialize_controls(const std::filesystem::path& runtime_dir) {
     const std::filesystem::path controls_path = runtime_dir / "controls.json";
@@ -294,18 +325,7 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         return false;
     }
 
-    const bool ok = recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
-
-    if (controller_num == 0) {
-        static uint16_t previous_buttons = 0;
-        if (*buttons != previous_buttons) {
-            std::printf("Player 1 N64 buttons: 0x%04X\n", *buttons);
-            std::fflush(stdout);
-            previous_buttons = *buttons;
-        }
-    }
-
-    return ok;
+    return recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
 }
 
 void set_rumble(int controller_num, bool on) {
@@ -370,6 +390,8 @@ const char* validation_error_name(recomp::RomValidationError error) {
 } // namespace
 
 int main(int argc, char** argv) {
+    install_crash_handlers();
+
     if (argc != 2) {
         std::fprintf(stderr, "usage: SnowboardKidsRecompiled <snowboardkids.z64>\n");
         return EXIT_FAILURE;
