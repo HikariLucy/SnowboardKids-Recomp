@@ -249,3 +249,33 @@ Result          : PASS
 ```
 
 This is intentionally before RT64/SDL/frontend so any linker or runtime identity issue remains isolated.
+
+
+### First runtime linker boundary
+
+The first `SnowboardKidsRuntimeSmoke` build compiled all 149 objects and reached the final executable link. The unresolved symbols were limited to:
+
+```text
+__osPfsSelectBank_recomp
+__osContRamRead_recomp
+__osContRamWrite_recomp
+rmonPrintf_recomp
+```
+
+These functions are in N64Recomp's built-in ignored-function set. The generated SBK1 translation can still contain references to them because some compiled libultra internals share output translation units with game code.
+
+For the current runtime baseline:
+
+- N64ModernRuntime's public Controller Pak/PFS functions return `PFS_ERR_NOPACK` (`1`);
+- the SBK1 matching decomp defines `rmonPrintf` as an empty function.
+
+Therefore `src/main/runtime_compat.cpp` provides narrow ABI shims:
+
+```text
+__osPfsSelectBank_recomp -> PFS_ERR_NOPACK
+__osContRamRead_recomp   -> PFS_ERR_NOPACK
+__osContRamWrite_recomp  -> PFS_ERR_NOPACK
+rmonPrintf_recomp        -> no-op
+```
+
+These are bootstrap compatibility shims, not the final Controller Pak implementation. Persistent SBK1 save/replay support remains a later PFS task.
