@@ -129,3 +129,11 @@ Possible work:
 - Debug tools
 
 Enhancements must remain separable from compatibility fixes so original behavior can always be tested.
+
+
+### Current next milestones
+
+- [ ] Reach title/menu reliably
+- [ ] Wire real keyboard/controller input through RecompFrontend
+- [ ] Validate audio task execution beyond startup
+- [ ] Reach first playable race
