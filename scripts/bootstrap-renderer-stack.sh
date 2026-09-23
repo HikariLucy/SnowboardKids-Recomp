@@ -12,6 +12,10 @@ RT64_COMMIT="6a4166b2cfa952d931a08481d1037da995f28b54"
 FRONTEND_REPO="https://github.com/cdlewis/RecompFrontend.git"
 FRONTEND_COMMIT="e85b912d9df677b04f9358867dd010c8af27ea05"
 
+THEME_DIR="$DEPS_DIR/recomp-theme"
+THEME_REPO="https://github.com/cdlewis/snowboardkids-recomp-theme.git"
+THEME_COMMIT="0cb9a83a263607fbc8ab6176a758a00726e237cc"
+
 for cmd in git cmake ninja clang clang++ pkg-config; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
         echo "Missing dependency: $cmd" >&2
@@ -53,10 +57,13 @@ clone_and_pin() {
 
 clone_and_pin "$RT64_REPO" "$RT64_COMMIT" "$RT64_DIR"
 clone_and_pin "$FRONTEND_REPO" "$FRONTEND_COMMIT" "$FRONTEND_DIR"
+clone_and_pin "$THEME_REPO" "$THEME_COMMIT" "$THEME_DIR"
 
 echo
 echo "Renderer stack ready."
 echo "RT64:           $RT64_COMMIT"
 echo "RecompFrontend: $FRONTEND_COMMIT"
+echo "Recomp theme:   $THEME_COMMIT"
 echo "RT64 path:      $RT64_DIR"
 echo "Frontend path:  $FRONTEND_DIR"
+echo "Theme path:     $THEME_DIR"
