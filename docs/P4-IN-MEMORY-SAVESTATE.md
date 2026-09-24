@@ -1,7 +1,19 @@
 # P4 — complete in-memory savestate
 
-Status: proposed integration design; **not implemented or demonstrated**.
-Inspection date: 2026-09-23. No commits made.
+**P4-A STATUS:**
+**CODE-SIDE COMPLETE**
+**FINAL MANUAL RACE_FINISH GATE PENDING**
+
+**DO NOT START P4-B CAPTURE/RESTORE UNTIL P4-A FINAL GATE PASSES.**
+
+Status updated: 2026-09-24. The P4 architecture is approved with the clarifications
+below. P4-A production continuation implementation is complete; overall P4-A
+acceptance remains **PENDING**, not PASS. P4-B snapshot capture/restore is not
+implemented or demonstrated and remains blocked. This documentation update ran
+no builds, ROM or live tests and made no code changes.
+
+See [P4-A production validation](P4-A-PRODUCTION-VALIDATION.md) for the confirmed
+evidence, pins, patch order and the sole remaining manual acceptance requirement.
 
 ## Objective and scope
 
@@ -17,36 +29,43 @@ and dirty-page optimization. Diagnostic reports are not snapshot persistence.
 Current user graphics settings survive restoration. New configurations retain
 `AspectRatio::Original`.
 
-## Repository findings
+## Current repository status
 
-The passing earlier experiments remain useful evidence, but are not yet a
-complete execution backend for the game:
+P1 and P1.5 remain historical prototype and schema evidence. Their limitations
+do not describe the completed P4-A production backend:
 
-- `docs/P1-SERIALIZABLE-CONTINUATION.md` explicitly limits P1 to an isolated
-  three-frame proof. `tests/continuation/generate.cpp` rejects indirect/lookup
-  calls and jump-table generation.
-- `tests/continuation_design/README.md` says the P1.5 schema and flow checks do
-  not implement full-game continuation support. The corpus inventory reports
-  1,981 generated functions and jump-table scratch locals.
-- `librecomp/src/recomp.cpp::run_thread_function` in the pinned runtime still
-  creates a stack-local `recomp_context` and invokes a native generated function.
-  The application CMake target still compiles the ordinary `RecompiledFuncs`.
-- P2 parks existing native execution owners and preserves their stacks. Its
-  8 MiB audit and renderer roundtrip cannot substitute for a full snapshot.
-- `src/main/native_boot.cpp` converts and queues audio without an owned semantic
-  backlog that can reconstruct audio after advancing and loading.
-- `patches/recompfrontend-quiescence.patch` already changes the initial aspect
-  ratio from Expand to Original. Preserve that change and existing settings.
+- The active production continuation backend covers 1,981 generated functions
+  and 56 HLE with a host-owned, lifetime-checked execution-owner registry.
+- The startup execution context has permanently retired. Zero native
+  suspendable fallbacks were observed in confirmed real-game validation.
+- Boot, Controller Pak, main menu, character select, course select, interactive
+  race scene and `race_active` passed. The initial title demo was confirmed as
+  original behavior. More than 208 million continuation dispatches were observed.
+- `race_finish` remains pending manual validation; it is not implied by
+  `race_active`, dispatch counts or compilation success.
+- Fresh apply, idempotent second apply, partial-state detection, wrong-pin
+  detection and a clean build from scratch with `SBK_CONTINUATIONS=ON` passed.
+  Production continuation tests, five auditor tests and six schema tests passed.
+- `recompfrontend-resolution.patch` owns the frontend HD presets, their
+  `recompui/resolution.h` header and the Original aspect-ratio default. It is
+  applied before `recompfrontend-quiescence.patch`; current graphics behavior
+  and settings are preserved.
 
-Therefore an implementation that copies memory and imports P3 while releasing
-the old native stacks would be incorrect. No such path is proposed.
+The runtime pin is `6ccb2e7c2e7f6708257b461097e0aaf03c445e2a`; the recompiler pin
+is `ffb39cdad1da5de07eaaa48bd1db4a89a7986771`. Canonical runtime patch order is
+**osStopThread → quiescence → continuations**. RecompFrontend order is
+**resolution → quiescence**.
+
+These results establish code-side completion, not full snapshot restorability.
+The memory, runtime reconstruction, semantic audio backlog and transactional
+restore requirements below remain P4-B work blocked by the final P4-A gate.
 
 ## Chosen architecture
 
-Extend the existing explicit-frame generator and integrate an owned execution
-registry with the runtime. Preserve scheduler semantics and P2 device barriers;
-replace reliance on suspended generated/HLE stacks with named continuation and
-blocked-operation records. Adapt P2 owner retirement/release so workers from an
+P4-A has integrated the explicit-frame production backend and host-owned
+execution registry. Preserve that implementation, scheduler semantics and P2
+device barriers when P4-B becomes eligible. Use named continuation and
+blocked-operation records for reconstruction. Adapt P2 owner retirement/release so workers from an
 old timeline cannot reenter after a load. Do not replace this with native stack
 cloning or restart thread entrypoints.
 
@@ -58,6 +77,45 @@ renderer object representations never become snapshot data.
 An alternative single-host-thread scheduler would remove some reconstruction
 work but substantially change the runtime's execution model. Extending the
 current scheduler with explicit ownership is preferred to limit that change.
+
+## P4-A production continuation backend gate
+
+P4-A is a hard prerequisite to any snapshot restore/load implementation. The
+real `SnowboardKidsRecompiled` production executable must boot, navigate menus,
+and complete a race using explicit serializable continuations. Isolated proofs,
+corpus inventory, compilation, P2 freezes and P3 roundtrips do not pass this gate.
+No native-call fallback may exist on suspendable paths, including generated,
+indirect, overlay, startup and HLE paths. Unsupported paths must fail explicitly.
+
+The production backend, code-side implementation and reproducibility validation
+are complete. The only remaining P4-A acceptance requirement is a manual
+interactive full race: observe `race_finish` and confirm zero continuation
+fallbacks through race completion. The boot-to-`race_active` evidence is already
+confirmed and must not be treated as unimplemented work.
+
+**DO NOT START P4-B CAPTURE/RESTORE UNTIL P4-A FINAL GATE PASSES.** Do not implement
+snapshot capture, restore/load, rollback or snapshot development triggers before
+that final manual acceptance. Do not mark P4-A fully PASS yet.
+
+## Authoritative execution ownership and startup
+
+A host-owned side table keyed by guest `OSThread` address **and lifetime
+generation** is the authoritative execution-owner/context registry. Address
+reuse creates a new lifetime; an obsolete owner cannot resolve to the new thread.
+The registry owns contexts, explicit frames, blocked-operation state and native
+worker associations. Host operation generations remain distinct from saved
+logical thread lifetimes and never rewind on load.
+
+Any native context field retained in guest memory is reconstructable/transient,
+never snapshot identity or an ownership authority. Explicitly register and
+normalize these slots, including retired slots, then rebind them from the side
+table. Never discover native pointers by scanning guest values.
+
+P4 snapshots are accepted only after the boot/startup execution context has
+permanently retired (and cannot reenter), or has become part of the serializable
+registry with all its live frames and blocked operations represented. A boot
+complete flag alone is insufficient; no unregistered startup native stack may
+survive capture.
 
 ## Snapshot components
 
@@ -81,15 +139,14 @@ full extent, but do not confuse nonzero pages with accessed/active pages. Report
 mapped, resident (where measurable), and nonzero pages separately; historical
 write activity is not measurable without additional instrumentation.
 
-Move host thread ownership out of guest memory, or sanitize only explicitly
-registered native-pointer slots while preserving layout and rebind those slots
-after installation. Track retired slots too. Never infer pointers by scanning
-for address-like values. No native function pointers, stack addresses, threads,
-locks, semaphores, SDL handles, Vulkan objects or RT64 objects are captured.
+Use the host-owned registry above for all thread ownership. No native function
+pointers, stack addresses, threads, locks, semaphores, SDL handles, Vulkan objects
+or RT64 objects are captured.
 
 ## Capture and transactional restore
 
-Capture is accepted only at a verified Frozen generation with boot complete,
+After the P4-A gate passes, capture is accepted only at a verified Frozen
+generation with startup permanently retired or registered as specified above,
 all required adapters available and all device work drained. Seal event
 admission while assembling the consistent snapshot; P2 currently permits host
 inbox additions during Frozen, so Frozen alone is insufficient for that domain.
@@ -122,9 +179,20 @@ through the existing frontend event pump.
 
 Keep logical event identities separate from host operation generations. The
 former are saved and hashed; the latter stay monotonic across repeated loads.
-External arrivals during a transaction cannot be silently mixed into the saved
-inbox. Reject stale device completions and defer new live input until the first
-post-release observation.
+Maintain a transaction-deferred external-arrival queue separate from the saved
+logical inbox. Sealing admission and classifying each arrival must be atomic
+with respect to producers: events arriving after sealing never enter the captured
+snapshot or its hashes. Preserve arrival order and host generation/provenance in
+this transaction-owned queue; do not silently drop arrivals or reopen admission
+between domain captures.
+
+On save, release deferred arrivals into the continuing timeline only after
+resume. On load, reject stale old-generation operation completions; admit only
+still-relevant live observations after the restored generation is released.
+Relevance must be checked against the restored device/request state, rather than
+relabeling an old completion as new. On rollback, apply the same release and
+provenance checks against the reconstructed rollback timeline. Remain sealed
+while Frozen after an unrecoverable failure.
 
 ## Development API and validation
 
@@ -139,7 +207,7 @@ declared reconstructable pointers, wall-clock anchors and operation generations.
 Never hash container storage, padding or native addresses. Compare individual
 domains before the aggregate so failures identify the missing state.
 
-Required validation sequence:
+Future P4-B snapshot validation sequence (not pending P4-A implementation):
 
 1. Cover the actual generated corpus, including direct/indirect/tail calls,
    jump tables, delay slots and live locals. No native-call fallback may hide a
@@ -178,9 +246,12 @@ configuration separately from an existing Expand configuration.
 | Rollback overhead | Dense memory alone adds 512 MiB, plus semantic/GPU/audio data; estimate, not measurement |
 | Immediate canonical state/hash comparison | Not run for P4 |
 | P3 color/depth comparison after independent advancement | Not run for P4 |
-| Menu, selection, race and repeated-load demonstrations | Not run |
+| Snapshot undo in menus, selection, race and repeated loads | Not run for P4-B; P4-A gameplay through `race_active` passed |
 | 100-cycle P4 stress | Not run |
-| Repository continuation auditor tests | 5 passed during this inspection |
+| Repository continuation auditor tests | 5 PASS, previously confirmed |
+| Continuation schema tests | 6 PASS, previously confirmed |
+| P4-A production tests and clean build | PASS; code-side complete |
+| P4-A final manual `race_finish` gate | PENDING; only remaining P4-A acceptance requirement |
 
 Measure freeze acquisition separately from capture and restore work; report
 median, p95 and maximum. Track live snapshot, rollback, staging and adapter scratch
@@ -189,22 +260,33 @@ available. Two dense snapshots alone require 1 GiB beyond the live memory image.
 Avoid accidental additional full-memory copies. Do not introduce dirty tracking
 unless measured memory/latency makes the baseline infeasible.
 
-P5 audio/timing discrepancies are not yet characterized. Existing design limits
-include the device's already-submitted audio tail and live external timing/input
-observations. P4 must reconstruct the semantic audio backlog; it cannot defer
-missing audio state to P5 or claim input-only deterministic replay from live runs.
+## P4/P5 audio boundary
+
+P4 restores the semantic PCM backlog, source rate, submission order, consumed
+offsets and conversion history/boundary state sufficiently that loading rewinds
+audio to the saved timeline. Clear future software audio and converter state;
+reconstruct and queue the saved backlog exactly once. Repeated loads must not
+leak future audio, duplicate submissions, accumulate conversion errors or cause
+progressive corruption. Audio validation must exercise source-rate changes,
+partially consumed segments and repeated advancement/load cycles.
+
+P5 covers timing/fidelity refinement, already-submitted hardware tail, drift and
+deterministic observation concerns. These exclusions do not permit missing PCM
+or conversion state, future software backlog leakage or progressive corruption
+in P4. Live input/timing observations do not establish input-only deterministic
+replay.
 
 ## Implementation ownership and review status
 
-Planned changes belong in the explicit-frame generator integration, project-owned
-runtime/frontend/RT64 patches where necessary, `src/quiescence`, a focused
-in-memory snapshot service, `src/main/native_boot.cpp`, build/patch application
-scripts, and runtime/live validation tests. Regenerated proprietary game output
-must follow the repository's existing generated-artifact policy.
+P4-A code-side work is complete. The updated implementation plan and
+[P4-A validation report](P4-A-PRODUCTION-VALIDATION.md) supersede the original
+2026-09-23 task-1-only status. Do not restart completed generator, execution-owner,
+runtime or HLE work based on the old checklist.
 
-Changes made in this continuation: this document only. Existing working-tree
-changes predate this inspection and have not been rewritten. The five auditor
-tests validate inventory logic, not full-game restorability.
+The approved snapshot architecture remains future P4-B scope. Preserve all
+existing working-tree changes and the generated-artifact policy. Auditor and
+schema tests do not establish full-game restorability. Overall P4-A acceptance
+remains pending only the manual full race, `race_finish` observation and zero
+continuation fallbacks. No P4 snapshot acceptance is claimed.
 
-This written architectural design awaits review before a detailed implementation
-plan and code integration. No P4 acceptance claim is made.
+**DO NOT START P4-B CAPTURE/RESTORE UNTIL P4-A FINAL GATE PASSES.**
