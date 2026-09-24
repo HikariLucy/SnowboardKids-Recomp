@@ -8,20 +8,27 @@
 #include "continuation/runtime_owner.hpp"
 #include "quiescence/quiescence.hpp"
 #include "quiescence/renderer_state.hpp"
+#include "savestate/host_audio.hpp"
 #include "savestate/runtime_domains.hpp"
+#include "savestate/sbks.hpp"
 #include "savestate/service.hpp"
+#include "savestate/storage.hpp"
 #include "ultramodern/savestate.hpp"
 #include "ultramodern/ultramodern.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <set>
+#include <string>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 using namespace std::chrono_literals;
@@ -179,9 +186,40 @@ void thaw(uint64_t gen) {
     CHECK(q::resume(gen));
     until([] { return q::status().state == q::State::Idle; });
 }
+// Synthetic host audio device behind the real AudioDomain (P5 boundary):
+// advancing play submits PCM and the "device" consumes part of it, so every
+// capture sees a pending, partially consumed backlog. Test thread only.
+struct FakeAudio {
+    s::audio::Boundary boundary{1 << 20};
+    std::vector<uint8_t> queue;
+    std::array<float, 8> history{};
+    uint32_t produced = 0;
+    s::audio::DeviceFormat format() const { return {ultramodern::savestate::get_audio_frequency(), 48000, 2}; }
+    void play(size_t frames) {
+        std::vector<uint8_t> pcm(frames * 8);
+        for (auto& b : pcm) b = uint8_t(++produced);
+        queue.insert(queue.end(), pcm.begin(), pcm.end());
+        boundary.submitted(pcm.data(), pcm.size());
+        history[produced % 8] = float(produced);
+        const size_t consumed = std::min(queue.size(), (frames * 3 / 4) * 8); // whole frames
+        queue.erase(queue.begin(), queue.begin() + long(consumed));
+    }
+    s::HostAudio host() {
+        return {[this](s::AudioState& st, std::string& e) { return boundary.capture(format(), history, uint32_t(queue.size()), st, e); },
+            [this](const s::AudioState& st, std::string& e) {
+                const s::audio::HostQueue ops{[this] { return uint32_t(queue.size()); }, [this] { queue.clear(); },
+                    [this](const uint8_t* d, uint32_t n, std::string&) { queue.insert(queue.end(), d, d + n); return true; }};
+                return boundary.install(st, format(), history, ops, e);
+            },
+            [this](const s::AudioState& st, std::string& e) { return boundary.validate(st, format(), history.size(), e); }};
+    }
+};
+FakeAudio fake_audio;
+
 void advance(int items) {
     const int target = word(CONSUMED) + items;
     until([&] { return word(CONSUMED) >= target; });
+    fake_audio.play(size_t(40 + items % 13));
 }
 std::vector<int32_t> queue_contents(int32_t queue) {
     uint8_t* rdram = ram;
@@ -200,6 +238,9 @@ struct Stats {
     uint64_t pct(double p) {
         auto sorted = values; std::sort(sorted.begin(), sorted.end());
         return sorted[std::min(sorted.size() - 1, size_t(p * (sorted.size() - 1) + 0.5))];
+    }
+    std::string line() {
+        return "median=" + std::to_string(pct(0.5)) + " p95=" + std::to_string(pct(0.95)) + " max=" + std::to_string(pct(1.0));
     }
 };
 void check_owners(size_t expected, uint64_t stale_below) {
@@ -236,7 +277,55 @@ std::vector<uint8_t> renderer_blob(uint64_t generation, uint8_t color_seed, uint
     return blob;
 }
 
-int main() {
+s::sbks::Identity file_identity(const s::SnapshotService& service) {
+    s::sbks::Identity id;
+    id.rom_hash = 0x5EEDull;          // fixture "ROM" identity
+    id.build = {0xC0FFEEull, 7, 61};
+    id.present_mask = service.available();
+    return id;
+}
+
+std::vector<uint8_t> encode_file(const s::InMemorySnapshot& snap, const s::SnapshotService& service) {
+    std::vector<uint8_t> bytes;
+    std::string error;
+    if (!s::sbks::encode(snap, file_identity(service), {"fixture", "quick"}, bytes, error)) {
+        std::fprintf(stderr, "encode: %s\n", error.c_str());
+        CHECK(false);
+    }
+    return bytes;
+}
+
+// Restore rejected before any mutation: same memory, hashes and owners; the
+// barrier stays Frozen and the timeline continues.
+void expect_rejected(s::SnapshotService& service, const s::InMemorySnapshot& bad, const char* what) {
+    const uint64_t gen = freeze();
+    s::InMemorySnapshot before;
+    CHECK(service.capture(gen, before).ok);
+    const auto memory = std::vector<uint8_t>(ram, ram + kExtent);
+    const auto owners = c::live_owner_count();
+    const auto total = c::total_registered_owners();
+    const auto queue = fake_audio.queue;
+    auto r = service.restore(gen, bad);
+    CHECK(!r.ok && !r.rolled_back && !r.unrecoverable);
+    CHECK(q::status().state == q::State::Frozen);
+    CHECK(std::memcmp(memory.data(), ram, kExtent) == 0);
+    CHECK(c::live_owner_count() == owners && c::total_registered_owners() == total);
+    CHECK(fake_audio.queue == queue);
+    s::InMemorySnapshot after;
+    CHECK(service.capture(gen, after).ok);
+    CHECK(after.hashes == before.hashes);
+    thaw(gen);
+    advance(10);
+    CHECK(word(ERROR_FLAG) == 0);
+    std::printf("rejected without mutation: %-26s %s\n", what, r.error.c_str());
+}
+
+int main(int argc, char** argv) {
+    enum class Mode { Full, Save, Load } mode = Mode::Full;
+    std::filesystem::path state_file;
+    if (argc == 3 && !std::strcmp(argv[1], "--save")) { mode = Mode::Save; state_file = argv[2]; }
+    else if (argc == 3 && !std::strcmp(argv[1], "--load")) { mode = Mode::Load; state_file = argv[2]; }
+    else if (argc != 1) { std::fprintf(stderr, "usage: savestate_runtime [--save|--load <file.sbks>]\n"); return 2; }
     ram = static_cast<uint8_t*>(std::aligned_alloc(4096, kExtent));
     std::memset(ram, 0, kExtent);
     uint8_t* rdram = ram;
@@ -277,10 +366,54 @@ int main() {
     s::ContinuationDomain continuations(ram);
     s::SchedulerDomain scheduler;
     s::TimeDomain time;
-    s::AudioDomain audio;
+    s::AudioDomain audio(fake_audio.host());
     s::InputDomain input;
     for (s::Domain* d : std::initializer_list<s::Domain*>{&memory, &continuations, &scheduler, &time, &audio, &input}) service.add(d);
     service.set_build({0xC0FFEEull, 7, 61});
+
+    // ---- P6 cross-process: process A saves, a fresh process B loads ----
+    if (mode == Mode::Save) {
+        advance(100);
+        const uint64_t gen = freeze();
+        s::InMemorySnapshot saved;
+        CHECK(service.capture(gen, saved).ok);
+        const auto bytes = encode_file(saved, service);
+        std::string error;
+        CHECK(s::storage::write_atomic(state_file, bytes, error));
+        std::printf("process A: saved consumed=%d checksum=%d aggregate=%016llx bytes=%zu\n", word(CONSUMED), word(CHECKSUM),
+            (unsigned long long)saved.hashes.aggregate, bytes.size());
+        thaw(gen);
+        advance(50);
+        std::puts("PASS: process A saved and exits without cleanup");
+        std::fflush(stdout);
+        std::_Exit(0);
+    }
+    if (mode == Mode::Load) {
+        advance(37); // a different point of a fresh timeline, other host lifetimes
+        std::vector<uint8_t> bytes;
+        std::string error;
+        CHECK(s::storage::read_bounded(state_file, s::sbks::Limits{}.max_file_bytes, bytes, error) == s::storage::ReadStatus::Ok);
+        s::InMemorySnapshot loaded;
+        const auto decoded = s::sbks::decode(bytes, file_identity(service), loaded);
+        if (!decoded.ok()) std::fprintf(stderr, "decode: %s %s\n", s::sbks::status_name(decoded.status), decoded.detail.c_str());
+        CHECK(decoded.ok());
+        const auto owners_before = c::total_registered_owners();
+        const uint64_t gen = freeze();
+        auto r = service.restore(gen, loaded);
+        if (!r.ok) std::fprintf(stderr, "restore: %s / %s\n", r.error.c_str(), r.rollback_error.c_str());
+        CHECK(r.ok && r.hashes == loaded.hashes);
+        CHECK(c::logical_lifetime_counter() == loaded.continuations.logical_lifetime_counter);
+        check_owners(loaded.continuations.threads.size(), owners_before + 1);
+        const int consumed = word(CONSUMED);
+        std::printf("process B: restored consumed=%d checksum=%d aggregate=%016llx restore_us=%llu\n", consumed, word(CHECKSUM),
+            (unsigned long long)r.hashes.aggregate, (unsigned long long)r.total_micros);
+        thaw(gen);
+        advance(300);
+        CHECK(word(ERROR_FLAG) == 0 && word(CONSUMED) >= consumed + 300);
+        std::puts("PASS: process B loaded the .sbks of process A and continued 300 items");
+        std::fflush(stdout);
+        std::_Exit(0);
+    }
 
     // ---- A/C/D: capture integrity, canonical equality, no host addresses ----
     uint64_t gen = freeze();
@@ -547,6 +680,137 @@ int main() {
         (unsigned long long)capture_us.pct(0.5), (unsigned long long)capture_us.pct(0.95), (unsigned long long)capture_us.pct(1.0),
         (unsigned long long)restore_us.pct(0.5), (unsigned long long)restore_us.pct(0.95), (unsigned long long)restore_us.pct(1.0),
         (unsigned long long)payload.pct(1.0));
+
+    // ---- Phase 2 robustness: the same snapshot restored 100 times ----
+    {
+        gen = freeze();
+        s::InMemorySnapshot a;
+        CHECK(service.capture(gen, a).ok);
+        const auto a_consumed = word(CONSUMED), a_checksum = word(CHECKSUM);
+        const auto a_queue = fake_audio.queue;
+        thaw(gen);
+        const auto superseded = scheduler.superseded, admitted = scheduler.admitted;
+        for (int i = 0; i < 100; ++i) {
+            advance(5 + i % 11);
+            const uint64_t total = c::total_registered_owners();
+            gen = freeze();
+            auto r = service.restore(gen, a);
+            if (!r.ok) std::fprintf(stderr, "same-snapshot restore %d: %s\n", i, r.error.c_str());
+            CHECK(r.ok && r.hashes == a.hashes);
+            CHECK(word(CONSUMED) == a_consumed && word(CHECKSUM) == a_checksum);
+            CHECK(fake_audio.queue == a_queue);                     // backlog queued once, never accumulated
+            CHECK(c::logical_lifetime_counter() == a.continuations.logical_lifetime_counter); // no leaked lifetimes
+            check_owners(a.continuations.threads.size(), total + 1);
+            thaw(gen);
+            CHECK(word(ERROR_FLAG) == 0);
+        }
+        CHECK(scheduler.superseded == superseded && scheduler.admitted == admitted); // no events duplicated/lost
+        // capture A -> capture B -> restore B; a failed capture never replaces B.
+        advance(20);
+        gen = freeze();
+        s::InMemorySnapshot b;
+        CHECK(service.capture(gen, b).ok);
+        CHECK(!(b.hashes == a.hashes));
+        const auto b_consumed = word(CONSUMED);
+        thaw(gen);
+        advance(30);
+        s::InMemorySnapshot slot = b;
+        CHECK(!service.capture(gen, slot).ok);                        // stale generation: rejected
+        CHECK(slot.hashes == b.hashes);
+        gen = freeze();
+        auto r = service.restore(gen, slot);
+        CHECK(r.ok && r.hashes == b.hashes && word(CONSUMED) == b_consumed);
+        thaw(gen);
+        advance(20);
+        CHECK(word(ERROR_FLAG) == 0);
+        std::puts("repeated restore: 100x same snapshot (0 mismatches, 0 stale owners, 0 leaked lifetimes); A->B->restore B; failed capture keeps slot");
+
+        // Rejections before mutation.
+        auto bad = b; bad.magic ^= 1; bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "invalid magic");
+        bad = b; bad.build.corpus_digest ^= 1; bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "incompatible build");
+        bad = b; bad.hashes.domain[size_t(s::DomainId::Time)] ^= 1;
+        expect_rejected(service, bad, "corrupt hash");
+        bad = b; bad.memory.data.resize(bad.memory.data.size() - 4096); bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "truncated memory");
+        bad = b; bad.memory.extent *= 2; bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "memory extent");
+        bad = b; bad.present &= ~s::domain_bit(s::DomainId::Input); bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "domain set");
+        bad = b; bad.audio.host_output_rate = 44100; bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "audio device format");
+        bad = b; bad.continuations.threads[0].frames.front().scratch.push_back(1); bad.hashes = s::compute_hashes(bad);
+        expect_rejected(service, bad, "continuation frame shape");
+    }
+
+    // ---- Phase 19: capture -> encode -> decode -> restore (100) and disk (50) ----
+    {
+        Stats encode_us, decode_us, save_us, load_us, restore_file_us;
+        size_t file_bytes = 0;
+        const auto dir = std::filesystem::temp_directory_path() / ("sbk-runtime-" + std::to_string(getpid()));
+        std::filesystem::create_directories(dir);
+        const auto path = *s::storage::slot_path(dir, s::storage::kQuickSlot);
+        std::string error;
+        for (int cycle = 0; cycle < 150; ++cycle) {
+            const bool disk = cycle >= 100;
+            advance(8 + cycle % 5);
+            gen = freeze();
+            s::InMemorySnapshot captured, twice;
+            CHECK(service.capture(gen, captured).ok);
+            const int consumed = word(CONSUMED), checksum = word(CHECKSUM);
+            auto t = std::chrono::steady_clock::now();
+            const auto bytes = encode_file(captured, service);
+            encode_us.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t).count());
+            if (cycle % 25 == 0) { CHECK(service.capture(gen, twice).ok); CHECK(encode_file(twice, service) == bytes); } // deterministic
+            file_bytes = bytes.size();
+            if (disk) {
+                t = std::chrono::steady_clock::now();
+                CHECK(s::storage::write_atomic(path, bytes, error));
+                save_us.add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t).count());
+            }
+            thaw(gen);
+            advance(10 + cycle % 7);
+            std::vector<uint8_t> input = bytes;
+            t = std::chrono::steady_clock::now();
+            if (disk) CHECK(s::storage::read_bounded(path, s::sbks::Limits{}.max_file_bytes, input, error) == s::storage::ReadStatus::Ok);
+            s::InMemorySnapshot loaded;
+            CHECK(s::sbks::decode(input, file_identity(service), loaded).ok());
+            (disk ? load_us : decode_us).add(std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t).count());
+            CHECK(loaded.hashes == captured.hashes);
+            const uint64_t total = c::total_registered_owners();
+            gen = freeze();
+            auto r = service.restore(gen, loaded);
+            if (!r.ok) std::fprintf(stderr, "file cycle %d: %s\n", cycle, r.error.c_str());
+            CHECK(r.ok && r.hashes == captured.hashes);
+            CHECK(word(CONSUMED) == consumed && word(CHECKSUM) == checksum);
+            CHECK(c::logical_lifetime_counter() == loaded.continuations.logical_lifetime_counter);
+            check_owners(loaded.continuations.threads.size(), total + 1);
+            if (disk) restore_file_us.add(r.total_micros);
+            thaw(gen);
+            CHECK(word(ERROR_FLAG) == 0);
+        }
+        // The same file loaded repeatedly into an advancing timeline.
+        std::vector<uint8_t> bytes;
+        CHECK(s::storage::read_bounded(path, s::sbks::Limits{}.max_file_bytes, bytes, error) == s::storage::ReadStatus::Ok);
+        s::InMemorySnapshot last;
+        CHECK(s::sbks::decode(bytes, file_identity(service), last).ok());
+        for (int i = 0; i < 10; ++i) {
+            advance(15);
+            gen = freeze();
+            CHECK(service.restore(gen, last).ok);
+            thaw(gen);
+        }
+        advance(50);
+        CHECK(word(ERROR_FLAG) == 0);
+        size_t leftovers = 0;
+        for (auto& e : std::filesystem::directory_iterator(dir)) leftovers += e.path().filename() != "quick.sbks";
+        CHECK(leftovers == 0);
+        std::filesystem::remove_all(dir);
+        std::printf("persistence stress: 100 encode/decode/restore + 50 disk save/load/restore + 10 reloads, fixture file_bytes=%zu\n", file_bytes);
+        std::printf("  fixture encode_us %s decode_us %s\n", encode_us.line().c_str(), decode_us.line().c_str());
+        std::printf("  fixture save_us %s load_us %s restore_us %s\n", save_us.line().c_str(), load_us.line().c_str(), restore_file_us.line().c_str());
+    }
 
     // ---- Unrecoverable path (last: leaves the barrier sealed in Restore) ----
     gen = freeze();
