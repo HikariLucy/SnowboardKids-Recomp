@@ -186,6 +186,8 @@ bool ContinuationDomain::capture(InMemorySnapshot& out, std::string& error) {
 }
 
 bool ContinuationDomain::validate(const InMemorySnapshot& in, std::string& error) const {
+    // A load into a fresh process waits until boot has handed over to owners.
+    if (!c::startup_is_retired()) { error = "runtime not ready: startup execution context still active"; return false; }
     for (const auto& t : in.continuations.threads) {
         for (const auto& f : t.frames) {
             try {

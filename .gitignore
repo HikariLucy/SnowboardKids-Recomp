@@ -30,6 +30,10 @@ __pycache__/
 *.log
 logs/
 
+# Savestates (generated) and interrupted-save temporaries
+*.sbks
+.*.sbks.tmp-*
+
 # Recompiler toolchain / generated native code
 .deps/
 build-tools/
