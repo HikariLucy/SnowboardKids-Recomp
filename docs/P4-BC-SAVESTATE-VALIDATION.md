@@ -1,13 +1,15 @@
 # P4-B / P4-C — In-memory savestate capture and transactional restore
 
 **STATUS (2026-09-24):**
-**P4-B CAPTURE: CODE-SIDE PASS**
-**P4-C RESTORE: CODE-SIDE PASS**
-**LIVE RESTORE: PENDING HUMAN VALIDATION — not claimed**
+**P4-A: PASS**
+**P4-B CAPTURE: PASS** (code-side and live)
+**P4-C RESTORE: PASS LIVE** (manual validation reported by user; see
+[Live gate](#live-gate-manual-validation-reported-by-user))
 
-Scope is in-memory only: at most one snapshot held by a development trigger.
-There is no `.sbks` format, no disk save/load, no final F5/F8 UX, no slots,
-no rewind/replay, and no dirty-page optimization. P5/P6/P7 are untouched.
+Scope of this document is the in-memory savestate held by the development
+trigger. Persistence (`.sbks`) and the user quicksave/quickload UX are
+documented separately in [P6](P6-PERSISTENT-SAVESTATE.md) and
+[P7](P7-SAVESTATE-UX.md). No rewind/replay and no dirty-page optimization.
 
 P4-A is PASS (manual race gate passed; see [P4-A validation](P4-A-PRODUCTION-VALIDATION.md)).
 SHUTDOWN-01 (below) is an unrelated teardown bug and stays in the backlog.
@@ -232,7 +234,9 @@ One snapshot is kept in memory and replaced only by a successful capture.
 Logs: `P4 DEV CAPTURE ok ...`, `P4 DEV RESTORE ok|ROLLED_BACK|UNRECOVERABLE ...`,
 per-domain `HASHES` and `PHASES` lines.
 
-## Live gate (pending, human)
+## Live gate (manual validation reported by user)
+
+Procedure:
 
 1. Start Snowboard Kids, enter an interactive race, reach a recognizable state.
 2. CAPTURE (Ctrl+F6); confirm `P4 DEV CAPTURE ok`.
@@ -242,7 +246,29 @@ per-domain `HASHES` and `PHASES` lines.
    continues without duplication or gross corruption; input works; the race
    stays playable at least 20 s.
 
-**Live PASS must not be claimed until a human performs this gate.**
+**Result: PASS — manual validation reported by user (2026-09-24).** The
+interaction (gameplay, visual/audio judgement, timings of play) was performed
+and judged by the user; the values below are the dev-trigger log lines the
+user reported. They were not measured by the implementing agent.
+
+| Reported item | Value |
+| --- | --- |
+| `P4 DEV CAPTURE ok` | 1 |
+| `P4 DEV RESTORE ok` | 1 |
+| capture `total_us` | 172506 |
+| capture `payload_bytes` | 3023639 |
+| capture `mapped_bytes` | 536870912 |
+| capture `resident_bytes` | 3575808 |
+| capture `nonzero_page_bytes` | 2699264 |
+| capture `nonzero_bytes` | 1965356 |
+| capture `threads` | 6 |
+| capture `renderer_bytes` | 311839 |
+| restore `total_us` | 193378 |
+| restore `rollback_bytes` | 3023663 |
+| CAPTURE hashes == RESTORED hashes | aggregate, memory, continuations, scheduler, time, vi, audio, input, overlays, rsp, renderer, color, depth |
+| hash/invariant failures | 0 |
+| continuation fallbacks/errors | 0 |
+| gameplay ≥ 20 s after restore | PASS |
 
 ## SHUTDOWN-01 (backlog, not addressed)
 

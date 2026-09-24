@@ -1,8 +1,9 @@
 # P4 — complete in-memory savestate
 
 **P4-A: PASS** (final manual race gate passed 2026-09-24).
-**P4-B CAPTURE: CODE-SIDE PASS. P4-C RESTORE: CODE-SIDE PASS.**
-**LIVE RESTORE GATE: PENDING HUMAN VALIDATION.**
+**P4-B CAPTURE: PASS. P4-C RESTORE: PASS LIVE** (manual validation reported
+by user, 2026-09-24: capture → ≥20 s play → restore → ≥20 s play, all domain
+hashes equal, 0 failures).
 
 Implementation, measurements and limitations are recorded in
 [P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md). This document keeps the
@@ -228,6 +229,12 @@ mutation rather than silently replacing user settings. Test a fresh Original
 configuration separately from an existing Expand configuration.
 
 ## Measurements and current results
+
+> Historical (pre-implementation) table, kept unchanged as design-time
+> evidence. Current measured and live results — including the live capture
+> (172.5 ms, 3.02 MB payload) and restore (193.4 ms) reported by the user —
+> are in [P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md). P4-A
+> `race_finish` subsequently passed.
 
 | Metric/result | Current evidence |
 | --- | --- |
