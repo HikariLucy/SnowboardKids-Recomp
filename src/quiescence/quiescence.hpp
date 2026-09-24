@@ -38,6 +38,11 @@ void poll(); // frontend: advances barriers, never waits for workers
 bool resume(uint64_t generation); // stale generations cannot release a barrier
 void cancel(const char* reason); // also used on shutdown; never fabricates Frozen
 void set_audio_callback(void (*callback)(bool paused));
+} // namespace sbk::quiescence
+namespace ultramodern::renderer { class RendererContext; }
+namespace sbk::quiescence {
+void set_renderer_context(ultramodern::renderer::RendererContext* context);
+ultramodern::renderer::RendererContext* get_renderer_context();
 
 // Every native game execution owner has a unique lifetime token. Park does not
 // signal a scheduler semaphore, change a guest queue, or change owner identity.

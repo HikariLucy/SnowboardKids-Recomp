@@ -69,7 +69,10 @@ const char* name(State s) {
 void enable() { on = true; }
 bool enabled() { return on.load(std::memory_order_relaxed); }
 void ready() { std::lock_guard lock(mutex); runtime_ready = true; }
+static ultramodern::renderer::RendererContext* global_renderer_context = nullptr;
 void set_audio_callback(void (*callback)(bool)) { std::lock_guard lock(mutex); audio_callback = callback; }
+void set_renderer_context(ultramodern::renderer::RendererContext* ctx) { std::lock_guard lock(mutex); global_renderer_context = ctx; }
+ultramodern::renderer::RendererContext* get_renderer_context() { std::lock_guard lock(mutex); return global_renderer_context; }
 uint64_t request() {
     if (!enabled()) return 0;
     std::lock_guard lock(mutex);

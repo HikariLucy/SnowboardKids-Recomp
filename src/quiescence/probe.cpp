@@ -1,6 +1,7 @@
 #include "probe.hpp"
 #include "quiescence.hpp"
 #include "ultramodern/ultramodern.hpp"
+#include "ultramodern/renderer_context.hpp"
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
@@ -87,6 +88,93 @@ void probe_poll() {
         frozen_time = logical_now(); frozen_audio = audio_bytes(); frozen_at = now;
         captured = true;
         note("audit", "frozen-memory-clock-audio", before.size());
+
+        auto* renderer = get_renderer_context();
+        if (renderer && setting("SBK_P3_TEST", 1)) {
+            // P3.1 Authority Validation: Pre-reset readbacks
+            std::vector<uint8_t> pre_gpu_color_pixels;
+            uint64_t pre_gpu_color_hash = 0;
+            bool color_gpu_read = renderer->readback_gpu_target(false, pre_gpu_color_pixels, &pre_gpu_color_hash);
+
+            uint64_t pre_rdram_color_hash = 0;
+            bool color_rdram_read = renderer->get_rdram_framebuffer_hash(false, &pre_rdram_color_hash);
+
+            bool color_gpu_eq_rdram = (color_gpu_read && color_rdram_read && pre_gpu_color_hash == pre_rdram_color_hash);
+
+            std::vector<uint8_t> pre_gpu_depth_pixels;
+            uint64_t pre_gpu_depth_hash = 0;
+            bool depth_gpu_read = renderer->readback_gpu_target(true, pre_gpu_depth_pixels, &pre_gpu_depth_hash);
+
+            uint64_t pre_rdram_depth_hash = 0;
+            bool depth_rdram_read = renderer->get_rdram_framebuffer_hash(true, &pre_rdram_depth_hash);
+
+            bool depth_valid = (depth_gpu_read && depth_rdram_read);
+            bool depth_gpu_eq_rdram = (depth_valid && pre_gpu_depth_hash == pre_rdram_depth_hash);
+
+            auto t0 = HostClock::now();
+            std::vector<uint8_t> blob;
+            bool exported = renderer->export_semantic_state(blob);
+            auto t1 = HostClock::now();
+
+            auto t2 = HostClock::now();
+            bool reset_ok = renderer->reset_semantic_state();
+            auto t3 = HostClock::now();
+
+            auto t4 = HostClock::now();
+            bool imported = renderer->import_semantic_state(blob.data(), blob.size());
+            auto t5 = HostClock::now();
+
+            auto t6 = HostClock::now();
+            bool presented = renderer->present_restored_frame();
+            auto t7 = HostClock::now();
+
+            // P3.1 Authority Validation: Post-import readbacks
+            std::vector<uint8_t> post_gpu_color_pixels;
+            uint64_t post_gpu_color_hash = 0;
+            bool post_color_read = renderer->readback_gpu_target(false, post_gpu_color_pixels, &post_gpu_color_hash);
+
+            bool color_roundtrip_match = (color_gpu_read && post_color_read && pre_gpu_color_hash == post_gpu_color_hash);
+
+            std::vector<uint8_t> post_gpu_depth_pixels;
+            uint64_t post_gpu_depth_hash = 0;
+            bool post_depth_read = false;
+            bool depth_roundtrip_match = false;
+            if (depth_valid) {
+                post_depth_read = renderer->readback_gpu_target(true, post_gpu_depth_pixels, &post_gpu_depth_hash);
+                depth_roundtrip_match = (post_depth_read && pre_gpu_depth_hash == post_gpu_depth_hash);
+            }
+
+            uint64_t post_rdram_color_hash = 0;
+            renderer->get_rdram_framebuffer_hash(false, &post_rdram_color_hash);
+
+            auto exp_us = std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count();
+            auto rst_us = std::chrono::duration_cast<std::chrono::microseconds>(t3 - t2).count();
+            auto imp_us = std::chrono::duration_cast<std::chrono::microseconds>(t5 - t4).count();
+            auto prs_us = std::chrono::duration_cast<std::chrono::microseconds>(t7 - t6).count();
+
+            bool hash_match = (pre_rdram_color_hash == post_rdram_color_hash);
+
+            std::fprintf(stderr, "P3.1 AUTHORITY gen=%llu color_pre_gpu=%016llx color_pre_rdram=%016llx color_post_gpu=%016llx color_gpu_eq_rdram=%d color_roundtrip_match=%d depth_valid=%d depth_pre_gpu=%016llx depth_pre_rdram=%016llx depth_post_gpu=%016llx depth_gpu_eq_rdram=%d depth_roundtrip_match=%d exp_us=%lld rst_us=%lld imp_us=%lld prs_us=%lld\n",
+                (unsigned long long)operation,
+                (unsigned long long)pre_gpu_color_hash, (unsigned long long)pre_rdram_color_hash, (unsigned long long)post_gpu_color_hash,
+                color_gpu_eq_rdram ? 1 : 0, color_roundtrip_match ? 1 : 0,
+                depth_valid ? 1 : 0,
+                (unsigned long long)pre_gpu_depth_hash, (unsigned long long)pre_rdram_depth_hash, (unsigned long long)post_gpu_depth_hash,
+                depth_gpu_eq_rdram ? 1 : 0, depth_roundtrip_match ? 1 : 0,
+                (long long)exp_us, (long long)rst_us, (long long)imp_us, (long long)prs_us);
+
+            std::fprintf(stderr, "P3 ROUNDTRIP gen=%llu exported=%d reset=%d imported=%d presented=%d size=%zu export_us=%lld reset_us=%lld import_us=%lld present_us=%lld ref_hash=%016llx post_hash=%016llx match=%d\n",
+                (unsigned long long)operation, exported, reset_ok, imported, presented, blob.size(),
+                (long long)exp_us, (long long)rst_us, (long long)imp_us, (long long)prs_us,
+                (unsigned long long)pre_rdram_color_hash, (unsigned long long)post_rdram_color_hash, hash_match ? 1 : 0);
+
+            if (!exported || !reset_ok || !imported || !presented || !hash_match) {
+                dump_trace();
+                std::fprintf(stderr, "P3 FAILED gen=%llu: semantic roundtrip failure (exported=%d reset=%d imported=%d presented=%d match=%d)\n",
+                    (unsigned long long)operation, exported, reset_ok, imported, presented, hash_match ? 1 : 0);
+                cancel("P3 roundtrip failed"); target = 0; return;
+            }
+        }
     }
     if (captured && current.state == State::Frozen && now - frozen_at >= std::chrono::milliseconds(hold_ms)) {
         bool same = std::memcmp(before.data(), memory.load(), before.size()) == 0 &&

@@ -15,16 +15,24 @@ args = parser.parse_args()
 lines = args.log.read_text(errors='replace').splitlines()
 trace_pattern = re.compile(r'P2 seq=(\d+) gen=(\d+) state=(\w+) participant=([^ ]+) op=([^ ]+) detail=(\d+)')
 audit_pattern = re.compile(r'P2 AUDIT gen=(\d+) unchanged=(\d) audio_bytes=(\d+) owners=(\d+)')
+p3_pattern = re.compile(r'P3 ROUNDTRIP gen=(\d+) exported=(\d) reset=(\d) imported=(\d) presented=(\d) size=(\d+) .* match=(\d)')
 traces = defaultdict(list)
 audits = {}
+p3_audits = {}
 sequence = 0
 last_vi = -1
 vi_transactions = 0
 event_deliveries = set()
 failures = []
 for line in lines:
-    if 'P2 TIMEOUT' in line or 'P2 FAILED' in line:
+    if 'P2 TIMEOUT' in line or 'P2 FAILED' in line or 'P3 FAILED' in line:
         failures.append(line)
+    p3_match = p3_pattern.match(line)
+    if p3_match:
+        gen, exp, rst, imp, prs, sz, match_ok = map(int, p3_match.groups())
+        if not (exp and rst and imp and prs and match_ok):
+            failures.append(f'P3 roundtrip failed for gen {gen}: {line}')
+        p3_audits[gen] = (sz, match_ok)
     match = trace_pattern.fullmatch(line)
     if match:
         seq, gen, state, who, op, detail = match.groups()
@@ -87,6 +95,7 @@ if args.graphics_config or args.check_aspect_ratio:
 result = {
     'log': args.log.name,
     'cycles': len(audits),
+    'p3_roundtrips': len(p3_audits),
     'aspect_ratio_option': observed_ar,
     'all_frozen_audits_unchanged': not any('audit' in f for f in failures),
     'gpu_fences_required': args.require_gpu_fences,

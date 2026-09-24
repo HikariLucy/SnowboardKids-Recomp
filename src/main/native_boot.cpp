@@ -28,6 +28,7 @@
 #include "recompui/program_config.h"
 #include "recomp_theme.h"
 #include "ultramodern/ultramodern.hpp"
+#include "ultramodern/config.hpp"
 
 namespace sbk {
 void register_overlays();
@@ -107,6 +108,28 @@ void init_frontend_config() {
 
     recompui::config::create_general_tab(general_options);
     recompui::config::create_graphics_tab();
+    if (const char* res_env = std::getenv("SBK_RESOLUTION")) {
+        std::string res_str = res_env;
+        for (auto& c : res_str) c = std::tolower(c);
+        ultramodern::renderer::Resolution res = ultramodern::renderer::Resolution::Auto;
+        if (res_str == "original" || res_str == "1x") {
+            res = ultramodern::renderer::Resolution::Original;
+        } else if (res_str == "2160p" || res_str == "4k" || res_str == "2160") {
+            res = ultramodern::renderer::Resolution::P2160;
+        } else if (res_str == "1080p" || res_str == "1080") {
+            res = ultramodern::renderer::Resolution::P1080;
+        } else if (res_str == "720p" || res_str == "720") {
+            res = ultramodern::renderer::Resolution::P720;
+        } else if (res_str == "auto") {
+            res = ultramodern::renderer::Resolution::Auto;
+        }
+        recompui::config::get_graphics_config().set_option_value(recompui::config::graphics::options::res_option, static_cast<uint32_t>(res));
+        recompui::config::get_graphics_config().apply_option_value(recompui::config::graphics::options::res_option);
+        auto config = ultramodern::renderer::get_graphics_config();
+        config.res_option = res;
+        ultramodern::renderer::set_graphics_config(config);
+        std::printf("Configured resolution from SBK_RESOLUTION: %s -> enum %d\n", res_env, static_cast<int>(res));
+    }
     recompui::config::create_controls_tab();
     recompui::config::create_sound_tab();
     recompui::config::create_mods_tab();

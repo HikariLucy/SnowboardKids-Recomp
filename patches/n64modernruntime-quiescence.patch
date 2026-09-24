@@ -1,4 +1,5 @@
 diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+index 1200f77..e8a1de2 100644
 --- a/librecomp/src/recomp.cpp
 +++ b/librecomp/src/recomp.cpp
 @@ -1,3 +1,4 @@
@@ -8,39 +9,83 @@ diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
  #include <cstring>
 @@ -754,11 +755,13 @@ bool wait_for_game_started(uint8_t* rdram, recomp_context* context) {
                  ultramodern::init_saving(rdram);
-
+ 
                  try {
 +                    sbk::quiescence::Owner boot_owner{0};
                      game_entry.entrypoint(rdram, context);
                  } catch (ultramodern::thread_terminated& terminated) {
-
+ 
                  }
              }
 +            sbk::quiescence::ready();
              return true;
-
+ 
          case GameStatus::Quit:
 @@ -892,6 +895,7 @@ void recomp::start(
          }
      }
-
+ 
 +    sbk::quiescence::cancel("shutdown");
      graphics_shutdown_ready.signal();
-
+ 
      game_thread.join();
+diff --git a/ultramodern/include/ultramodern/config.hpp b/ultramodern/include/ultramodern/config.hpp
+index 2f22456..a7dbb73 100644
+--- a/ultramodern/include/ultramodern/config.hpp
++++ b/ultramodern/include/ultramodern/config.hpp
+@@ -12,6 +12,11 @@ namespace ultramodern {
+             Original,
+             Original2x,
+             Auto,
++            // Append to preserve the existing enum values and Original2x configs.
++            P720,
++            P1080,
++            P1440,
++            P2160,
+             OptionCount
+         };
+         enum class WindowMode {
+@@ -89,6 +94,10 @@ namespace ultramodern {
+             {ultramodern::renderer::Resolution::Original, "Original"},
+             {ultramodern::renderer::Resolution::Original2x, "Original2x"},
+             {ultramodern::renderer::Resolution::Auto, "Auto"},
++            {ultramodern::renderer::Resolution::P720, "720p"},
++            {ultramodern::renderer::Resolution::P1080, "1080p"},
++            {ultramodern::renderer::Resolution::P1440, "1440p"},
++            {ultramodern::renderer::Resolution::P2160, "2160p"},
+         });
+ 
+         NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::WindowMode, {
 diff --git a/ultramodern/include/ultramodern/renderer_context.hpp b/ultramodern/include/ultramodern/renderer_context.hpp
+index d60c4ec..c57661f 100644
 --- a/ultramodern/include/ultramodern/renderer_context.hpp
 +++ b/ultramodern/include/ultramodern/renderer_context.hpp
-@@ -87,6 +87,8 @@ namespace ultramodern {
+@@ -5,6 +5,7 @@
+ #include <memory>
+ #include <optional>
+ #include <span>
++#include <vector>
+ 
+ #if defined(_WIN32)
+ #   define WIN32_LEAN_AND_MEAN
+@@ -87,6 +88,15 @@ namespace ultramodern {
                  virtual void send_dummy_workload(uint32_t fb_address) = 0;
                  virtual void update_screen() = 0;
                  virtual void shutdown() = 0;
 +                virtual bool drain_for_quiescence() { return false; }
 +                virtual void resume_from_quiescence() {}
++                virtual bool export_semantic_state(std::vector<uint8_t>& out_blob) { (void)out_blob; return false; }
++                virtual bool reset_semantic_state() { return false; }
++                virtual bool import_semantic_state(const uint8_t* data, size_t size) { (void)data; (void)size; return false; }
++                virtual bool present_restored_frame() { return false; }
++                virtual bool capture_framebuffer_hash(uint64_t* out_hash) { (void)out_hash; return false; }
++                virtual bool readback_gpu_target(bool depth, std::vector<uint8_t>& out_pixels, uint64_t* out_hash) { (void)depth; (void)out_pixels; (void)out_hash; return false; }
++                virtual bool get_rdram_framebuffer_hash(bool depth, uint64_t* out_hash) { (void)depth; (void)out_hash; return false; }
                  virtual uint32_t get_display_framerate() const = 0;
                  virtual float get_resolution_scale() const = 0;
-
+ 
 diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
+index 090cc42..1a652c3 100644
 --- a/ultramodern/src/events.cpp
 +++ b/ultramodern/src/events.cpp
 @@ -1,3 +1,4 @@
@@ -50,7 +95,7 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
  #include <chrono>
 @@ -189,6 +190,7 @@ void vi_thread_func() {
      int remaining_retraces = 1;
-
+ 
      while (!exited) {
 +        sbk::quiescence::vi_boundary();
          // Determine the next VI time (more accurate than adding 16ms each VI interrupt)
@@ -62,33 +107,33 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
          }
 +        sbk::quiescence::note("vi", "transaction", new_total_vis);
          total_vis = new_total_vis;
-
+ 
          // If the game hasn't started yet, set a dummy VI mode and origin.
 @@ -219,11 +222,13 @@ void vi_thread_func() {
              set_dummy_vi(odd);
              odd = !odd;
-
+ 
 -            events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
 +            sbk::quiescence::accepted(sbk::quiescence::Device::Graphics);
 +        events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
          }
-
+ 
          // Queue a screen update for the graphics thread with the current VI register state.
          // Doing this before the VI update is equivalent to updating the screen after the previous frame's scanout finished.
 +        sbk::quiescence::accepted(sbk::quiescence::Device::Graphics);
          events_context.action_queue.enqueue(ScreenUpdateAction{ events_context.vi.regs });
-
+ 
          // Update VI registers and swap VI modes.
 @@ -256,12 +261,14 @@ void vi_thread_func() {
  }
-
+ 
  void sp_complete() {
 +    sbk::quiescence::note("sp", "completion");
      uint8_t* rdram = events_context.rdram;
      std::lock_guard lock{ events_context.message_mutex };
      ultramodern::enqueue_external_message(events_context.sp.mq, events_context.sp.msg, false, true);
  }
-
+ 
  void dp_complete() {
 +    sbk::quiescence::note("dp", "completion");
      uint8_t* rdram = events_context.rdram;
@@ -101,27 +146,27 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
 -        events_context.sp_task_queue.wait_dequeue(task);
 +        sbk::quiescence::device_boundary(sbk::quiescence::Device::Rsp);
 +        if (!events_context.sp_task_queue.wait_dequeue_timed(task, std::chrono::milliseconds{1})) continue;
-
+ 
          if (task == nullptr) {
              return;
 @@ -290,9 +298,13 @@ void task_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_r
-
+ 
          // Tell the game that the RSP has completed
          sp_complete();
 +        sbk::quiescence::completed(sbk::quiescence::Device::Rsp);
      }
  }
-
+ 
 +static thread_local ultramodern::renderer::RendererContext* checkpoint_renderer;
 +static bool drain_renderer() { return checkpoint_renderer->drain_for_quiescence(); }
 +
  std::atomic_uint32_t display_refresh_rate = 60;
  std::atomic<float> resolution_scale = 1.0f;
-
+ 
 @@ -318,7 +330,12 @@ float ultramodern::get_resolution_scale() {
      return resolution_scale.load();
  }
-
+ 
 +static std::atomic_bool deferred_config{false};
  void ultramodern::trigger_config_action() {
 +    if (!sbk::quiescence::try_accept_config()) {
@@ -130,12 +175,13 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
 +    }
      events_context.action_queue.enqueue(UpdateConfigAction{});
  }
-
-@@ -353,7 +370,11 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+ 
+@@ -353,7 +370,12 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
      // Notify the caller thread that this thread is ready.
      thread_ready->signal();
-
+ 
 +    checkpoint_renderer = renderer_context.get();
++    sbk::quiescence::set_renderer_context(checkpoint_renderer);
      while (!exited) {
 +        sbk::quiescence::device_boundary(sbk::quiescence::Device::Graphics, drain_renderer);
 +        renderer_context->resume_from_quiescence();
@@ -143,16 +189,16 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
          // Try to pull an action from the queue
          Action action;
          if (events_context.action_queue.wait_dequeue_timed(action, 1ms)) {
-@@ -395,6 +416,7 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
+@@ -395,6 +417,7 @@ void gfx_thread_func(uint8_t* rdram, moodycamel::LightweightSemaphore* thread_re
              else if (const auto* dummy_workload_action = std::get_if<DummyWorkloadAction>(&action)) {
                  renderer_context->send_dummy_workload(dummy_workload_action->fb_address);
              }
 +            sbk::quiescence::completed(sbk::quiescence::Device::Graphics);
          }
      }
-
-@@ -562,15 +584,18 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
-
+ 
+@@ -562,15 +585,18 @@ void ultramodern::submit_rsp_task(RDRAM_ARG PTR(OSTask) task_) {
+ 
      // Send gfx tasks to the graphics action queue
      if (task->t.type == M_GFXTASK) {
 +        sbk::quiescence::accepted(sbk::quiescence::Device::Graphics);
@@ -164,29 +210,30 @@ diff --git a/ultramodern/src/events.cpp b/ultramodern/src/events.cpp
          events_context.sp_task_queue.enqueue(task);
      }
  }
-
+ 
  void ultramodern::send_si_message() {
 +    sbk::quiescence::note("si", "completion");
      ultramodern::enqueue_external_message(events_context.si.mq, events_context.si.msg, false, true);
  }
-
+ 
 diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
+index 961de3d..6c7b2b7 100644
 --- a/ultramodern/src/mesgqueue.cpp
 +++ b/ultramodern/src/mesgqueue.cpp
 @@ -1,4 +1,6 @@
 +#include "quiescence/quiescence.hpp"
  #include <thread>
 +#include <mutex>
-
+ 
  #include "blockingconcurrentqueue.h"
-
+ 
 @@ -10,42 +12,65 @@ struct QueuedMessage {
      OSMesg mesg;
      bool jam;
      bool requeue_if_blocked;
 +    uint64_t identity = 0;
  };
-
+ 
  static moodycamel::BlockingConcurrentQueue<QueuedMessage> external_messages {};
 +static moodycamel::ProducerToken external_producer{external_messages};
 +static std::mutex external_producer_mutex;
@@ -199,14 +246,14 @@ diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
 +    sbk::quiescence::note("external-events", "identity", message.identity);
 +    external_messages.enqueue(external_producer, message);
 +}
-
+ 
  void ultramodern::enqueue_external_message(PTR(OSMesgQueue) mq, OSMesg msg, bool jam, bool requeue_if_blocked) {
 -    external_messages.enqueue({mq, msg, jam, requeue_if_blocked});
 +    enqueue_ordered({mq, msg, jam, requeue_if_blocked});
  }
-
+ 
  bool do_send(RDRAM_ARG PTR(OSMesgQueue) mq_, OSMesg msg, bool jam, bool block);
-
+ 
 +static bool deliver_external(RDRAM_ARG const QueuedMessage& message) {
 +    bool delivered = do_send(PASS_RDRAM message.mq, message.mesg, message.jam, false);
 +    sbk::quiescence::note("external-events", delivered ? "delivered" :
@@ -229,7 +276,7 @@ diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
 +        enqueue_ordered(cur_mesg);
      }
  }
-
+ 
  void ultramodern::wait_for_external_message(RDRAM_ARG1) {
      QueuedMessage to_send;
 -    external_messages.wait_dequeue(to_send);
@@ -242,7 +289,7 @@ diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
 +        enqueue_ordered(to_send);
      }
  }
-
+ 
  void ultramodern::wait_for_external_message_timed(RDRAM_ARG u32 millis) {
 +    sbk::quiescence::game_safepoint();
      QueuedMessage to_send;
@@ -255,22 +302,24 @@ diff --git a/ultramodern/src/mesgqueue.cpp b/ultramodern/src/mesgqueue.cpp
      }
  }
 diff --git a/ultramodern/src/scheduling.cpp b/ultramodern/src/scheduling.cpp
+index a22f747..8e116d5 100644
 --- a/ultramodern/src/scheduling.cpp
 +++ b/ultramodern/src/scheduling.cpp
 @@ -1,3 +1,4 @@
 +#include "quiescence/quiescence.hpp"
  #include "ultramodern/ultramodern.hpp"
-
+ 
  void ultramodern::schedule_running_thread(RDRAM_ARG PTR(OSThread) t_) {
 @@ -16,6 +17,7 @@ void swap_to_thread(RDRAM_ARG OSThread *to) {
  }
-
+ 
  void ultramodern::check_running_queue(RDRAM_ARG1) {
 +    sbk::quiescence::game_safepoint();
      // Check if there are any threads in the running queue.
      if (!thread_queue_empty(PASS_RDRAM running_queue)) {
          // Check if the highest priority thread in the queue is higher priority than the current thread.
 diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+index 26ca182..cca124d 100644
 --- a/ultramodern/src/threads.cpp
 +++ b/ultramodern/src/threads.cpp
 @@ -1,3 +1,4 @@
@@ -280,7 +329,7 @@ diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
  #include <cassert>
 @@ -147,7 +148,9 @@ void ultramodern::set_native_thread_priority(ThreadPriority pri) {}
  #endif
-
+ 
  void wait_for_resumed(RDRAM_ARG UltraThreadContext* thread_context) {
 +    sbk::quiescence::owner_sleep();
      thread_context->running.wait();
@@ -290,13 +339,14 @@ diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
      if (TO_PTR(OSThread, ultramodern::this_thread())->context != thread_context) {
 @@ -183,6 +186,7 @@ void ultramodern::resume_thread_and_wait(RDRAM_ARG OSThread *t) {
  }
-
+ 
  static void _thread_func(RDRAM_ARG PTR(OSThread) self_, PTR(thread_func_t) entrypoint, PTR(void) arg, UltraThreadContext* thread_context) {
 +    sbk::quiescence::Owner execution_owner{static_cast<uint32_t>(self_)};
      OSThread *self = TO_PTR(OSThread, self_);
      debug_printf("[Thread] Thread created: %d\n", self->id);
      thread_self = self_;
 diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
+index 276301b..b179a6c 100644
 --- a/ultramodern/src/timer.cpp
 +++ b/ultramodern/src/timer.cpp
 @@ -1,3 +1,4 @@
@@ -306,17 +356,17 @@ diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
  #include <set>
 @@ -59,11 +60,11 @@ std::chrono::microseconds ticks_to_duration(uint64_t ticks) {
  }
-
+ 
  std::chrono::high_resolution_clock::time_point ticks_to_timepoint(uint64_t ticks) {
 -    return start_time + ticks_to_duration(ticks);
 +    return start_time + sbk::quiescence::excluded_wall_time() + ticks_to_duration(ticks);
  }
-
+ 
  uint64_t time_now() {
 -    return duration_to_ticks(std::chrono::high_resolution_clock::now() - start_time);
 +    return duration_to_ticks(sbk::quiescence::logical_now() - start_time);
  }
-
+ 
  void timer_thread(RDRAM_ARG1) {
 @@ -92,8 +93,10 @@ void timer_thread(RDRAM_ARG1) {
          // Determine the action type and act on it
@@ -328,11 +378,11 @@ diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
 +            sbk::quiescence::note("timer", "remove", static_cast<uint32_t>(remove_action->timer));
          }
      };
-
+ 
 @@ -104,10 +107,14 @@ void timer_thread(RDRAM_ARG1) {
              process_timer_action(cur_action);
          }
-
+ 
 +        sbk::quiescence::timer_boundary(active_timers.size());
 +
          // If there's no timer to act on, wait for one to come in from the action queue
@@ -345,10 +395,10 @@ diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
 +            }
 +            continue;
          }
-
+ 
          // Get the timer that's closest to running out
 @@ -119,6 +126,13 @@ void timer_thread(RDRAM_ARG1) {
-
+ 
          // Determine how long to wait to reach the timer's timestamp
          auto wait_duration = ticks_to_timepoint(cur_timer->timestamp) - std::chrono::high_resolution_clock::now();
 +        if (sbk::quiescence::enabled() && wait_duration > std::chrono::milliseconds{1}) {
@@ -358,7 +408,7 @@ diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
 +            }
 +            continue;
 +        }
-
+ 
          // Wait for either the duration to complete or a new action to come through
          if (wait_duration.count() >= 0 && timer_context.action_queue.wait_dequeue_timed(cur_action, wait_duration)) {
 @@ -130,6 +144,7 @@ void timer_thread(RDRAM_ARG1) {
@@ -371,15 +421,15 @@ diff --git a/ultramodern/src/timer.cpp b/ultramodern/src/timer.cpp
              if (cur_timer->interval != 0) {
 @@ -150,11 +165,11 @@ uint32_t ultramodern::get_speed_multiplier() {
  }
-
+ 
  std::chrono::high_resolution_clock::time_point ultramodern::get_start() {
 -    return start_time;
 +    return start_time + sbk::quiescence::excluded_wall_time();
  }
-
+ 
  std::chrono::high_resolution_clock::duration ultramodern::time_since_start() {
 -    return std::chrono::high_resolution_clock::now() - start_time;
 +    return sbk::quiescence::logical_now() - start_time;
  }
-
+ 
  extern "C" u32 osGetCount() {

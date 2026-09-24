@@ -1,0 +1,218 @@
+diff --git a/recompui/include/recompui/resolution.h b/recompui/include/recompui/resolution.h
+new file mode 100644
+index 0000000..0414ee3
+--- /dev/null
++++ b/recompui/include/recompui/resolution.h
+@@ -0,0 +1,53 @@
++#pragma once
++
++#include <algorithm>
++#include <array>
++#include "librecomp/config.hpp"
++#include "ultramodern/config.hpp"
++
++namespace recompui::resolution {
++    using ultramodern::renderer::Resolution;
++
++    struct Preset {
++        Resolution value;
++        const char* key;
++        const char* label;
++        double multiplier; // Zero selects RT64's window-dependent integer scaling.
++    };
++
++    inline constexpr std::array<Preset, 7> presets{{
++        {Resolution::Original, "Original", "Original", 1.0},
++        {Resolution::Original2x, "Original2x", "480p", 2.0},
++        {Resolution::P720, "720p", "720p-class", 3.0},
++        {Resolution::P1080, "1080p", "1080p-class", 4.5},
++        {Resolution::P1440, "1440p", "1440p-class", 6.0},
++        {Resolution::P2160, "2160p", "2160p/4K-class", 9.0},
++        {Resolution::Auto, "Auto", "Auto", 0.0},
++    }};
++
++    inline std::vector<recomp::config::ConfigOptionEnumOption> options() {
++        std::vector<recomp::config::ConfigOptionEnumOption> result;
++        for (const auto& preset : presets) {
++            result.emplace_back(preset.value, preset.key, preset.label);
++        }
++        return result;
++    }
++
++    struct Scale {
++        double multiplier;
++        int downsample;
++    };
++
++    inline Scale scale(Resolution value, int downsample) {
++        // Preserve supersampling for old configs. Explicit HD presets always
++        // use their stated internal scale, even if a saved ds_option is active.
++        const int ds = (value == Resolution::Original || value == Resolution::Original2x)
++            ? std::max(downsample, 1) : 1;
++        for (const auto& preset : presets) {
++            if (preset.value == value) {
++                return {preset.multiplier * ds, ds};
++            }
++        }
++        return {0.0, 1}; // Keep the renderer's existing unknown-value Auto fallback.
++    }
++}
+diff --git a/recompui/src/config/ui_config_option.cpp b/recompui/src/config/ui_config_option.cpp
+index 86428c9..a1b09c0 100644
+--- a/recompui/src/config/ui_config_option.cpp
++++ b/recompui/src/config/ui_config_option.cpp
+@@ -1,4 +1,5 @@
+ #include "ui_config_option.h"
++#include "recompui/config.h"
+ 
+ namespace recompui {
+ 
+@@ -141,6 +142,19 @@ ConfigOptionEnum::ConfigOptionEnum(
+         radio->add_option(enum_opt.options[i].name);
+     }
+ 
++    // Seven resolution labels need multiple rows in the graphics column.
++    // Keep each label intact and preserve Radio's left/right navigation order.
++    if (config->id == config::graphics::id && option_id == config::graphics::options::res_option) {
++        radio->set_width(100.0f, Unit::Percent);
++        radio->set_flex_wrap(FlexWrap::Wrap);
++        radio->set_gap(0.0f);
++        for (size_t i = 0; i < radio->num_options(); i++) {
++            auto* option = radio->get_option_element(i);
++            option->set_flex_shrink(0.0f);
++            option->set_margin_right(20.0f);
++        }
++    }
++
+     update_value();
+     update_enum_details();
+     update_enum_disabled();
+diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
+index 7332f2f..9f4b3f0 100644
+--- a/recompui/src/config/ui_config_tab_graphics.cpp
++++ b/recompui/src/config/ui_config_tab_graphics.cpp
+@@ -1,5 +1,6 @@
+ #include "librecomp/config.hpp"
+ #include "recompui/config.h"
++#include "recompui/resolution.h"
+ #include "recompui/renderer.h"
+ #include "util/steam_deck.h"
+ 
+@@ -19,11 +20,7 @@ namespace recompui {
+         }
+ 
+         using EnumOptionVector = const std::vector<recomp::config::ConfigOptionEnumOption>;
+-        static EnumOptionVector resolution_options = {
+-            {ultramodern::renderer::Resolution::Original, "Original", "Original"},
+-            {ultramodern::renderer::Resolution::Original2x, "Original2x", "Original 2x"},
+-            {ultramodern::renderer::Resolution::Auto, "Auto", "Auto"},
+-        };
++        static EnumOptionVector resolution_options = resolution::options();
+ 
+         enum class DownsamplingOption {
+             Off = 0,
+@@ -99,7 +96,7 @@ namespace recompui {
+             switch (res_option) {
+                 default:
+                 case ultramodern::renderer::Resolution::Auto:
+-                    return "Downsampling is not available at auto resolution";
++                    return "Downsampling is only available at Original and 480p resolution";
+                 case ultramodern::renderer::Resolution::Original:
+                     if (ds_option == DownsamplingOption::X2) {
+                         return "Rendered in 480p and scaled to 240p";
+@@ -111,7 +108,7 @@ namespace recompui {
+                     if (ds_option == DownsamplingOption::X2) {
+                         return "Rendered in 960p and scaled to 480p";
+                     } else if (ds_option == DownsamplingOption::X4) {
+-                        return "Rendered in 4K and scaled to 480p";
++                        return "Rendered in 1920p and scaled to 480p";
+                     }
+                     return "";
+             }
+@@ -235,7 +232,7 @@ namespace recompui {
+             config.add_enum_option(
+                 graphics::options::res_option,
+                 "Resolution",
+-                "Sets the output resolution of the game. <recomp-color primary>Original</recomp-color> matches the game's original 240p resolution. <recomp-color primary>Original 2x</recomp-color> will render at 480p. <recomp-color primary>Auto</recomp-color> will scale based on the game window's resolution.",
++                "Sets the internal rendering resolution without changing the aspect ratio. With downsampling off: Original is 320x240 (1x), 480p is 640x480 (2x), 720p-class is 960x720 (3x), 1080p-class is 1440x1080 (4.5x), 1440p-class is 1920x1440 (6x), and 2160p/4K-class is 2880x2160 (9x). Auto uses window-dependent integer scaling. Higher resolutions increase GPU load.",
+                 resolution_options,
+                 ultramodern::renderer::Resolution::Auto
+             );
+@@ -252,10 +249,10 @@ namespace recompui {
+             config.add_enum_option(
+                 graphics::options::ds_option,
+                 "Downsampling Quality",
+-                "Renders at a higher resolution and scales it down to the output resolution for increased quality. Only available in <recomp-color primary>Original</recomp-color> and <recomp-color primary>Original 2x</recomp-color> resolution."
++                "Renders at a higher resolution and scales it down to the output resolution for increased quality. Only available in <recomp-color primary>Original</recomp-color> and <recomp-color primary>480p</recomp-color> resolution."
+                 "<br />"
+                 "<br />"
+-                "Note: <recomp-color primary>4x</recomp-color> downsampling quality at <recomp-color primary>Original 2x</recomp-color> resolution may cause performance issues on low end devices, as it will cause the game to render <recomp-color warning>at almost 4k internal resolution</recomp-color>.",
++                "Note: <recomp-color primary>4x</recomp-color> downsampling quality at <recomp-color primary>480p</recomp-color> resolution may cause performance issues on low end devices, as it will cause the game to render <recomp-color warning>at 2560x1920 internal resolution</recomp-color>.",
+                 downsampling_options,
+                 DownsamplingOption::Off
+             );
+@@ -271,7 +268,11 @@ namespace recompui {
+                 config.add_option_disable_dependency(
+                     graphics::options::ds_option,
+                     graphics::options::res_option,
+-                    ultramodern::renderer::Resolution::Auto
++                    ultramodern::renderer::Resolution::Auto,
++                    ultramodern::renderer::Resolution::P720,
++                    ultramodern::renderer::Resolution::P1080,
++                    ultramodern::renderer::Resolution::P1440,
++                    ultramodern::renderer::Resolution::P2160
+                 );
+     
+                 config.on_json_parse_option(graphics::options::ds_option, [](const nlohmann::json& j) {
+@@ -288,7 +289,7 @@ namespace recompui {
+                 "Aspect Ratio",
+                 "Sets the horizontal aspect ratio. <recomp-color primary>Original</recomp-color> uses the game's original 4:3 aspect ratio. <recomp-color primary>Expand</recomp-color> will adjust to match the game window's aspect ratio.",
+                 aspect_ratio_options,
+-                ultramodern::renderer::AspectRatio::Expand
++                ultramodern::renderer::AspectRatio::Original
+             );
+ 
+             config.add_enum_option(
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index a7954c7..f8f8089 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -13,6 +13,7 @@
+ #include "renderer.h"
+ #include "recompui/recompui.h"
+ #include "recompui/config.h"
++#include "recompui/resolution.h"
+ #include "concurrentqueue.h"
+ 
+ using namespace recompui;
+@@ -139,23 +140,14 @@ RT64::EnhancementConfiguration::Presentation::Mode to_rt64(ultramodern::renderer
+ }
+ 
+ void set_application_user_config(RT64::Application* application, const ultramodern::renderer::GraphicsConfig& config) {
+-    switch (config.res_option) {
+-        default:
+-        case ultramodern::renderer::Resolution::Auto:
+-            application->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
+-            application->userConfig.downsampleMultiplier = 1;
+-            break;
+-        case ultramodern::renderer::Resolution::Original:
+-            application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+-            application->userConfig.resolutionMultiplier = std::max(config.ds_option, 1);
+-            application->userConfig.downsampleMultiplier = std::max(config.ds_option, 1);
+-            break;
+-        case ultramodern::renderer::Resolution::Original2x:
+-            application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+-            application->userConfig.resolutionMultiplier = 2.0 * std::max(config.ds_option, 1);
+-            application->userConfig.downsampleMultiplier = std::max(config.ds_option, 1);
+-            break;
++    const auto scale = recompui::resolution::scale(config.res_option, config.ds_option);
++    if (scale.multiplier == 0.0) {
++        application->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
++    } else {
++        application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
++        application->userConfig.resolutionMultiplier = scale.multiplier;
+     }
++    application->userConfig.downsampleMultiplier = scale.downsample;
+ 
+     switch (config.hr_option) {
+         default:
