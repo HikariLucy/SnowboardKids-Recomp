@@ -28,6 +28,8 @@ if [[ ! -f "$ROOT_DIR/rsp/aspMain.cpp" ]]; then
     exit 1
 fi
 
+python3 "$ROOT_DIR/scripts/apply-quiescence-patches.py"
+
 cmake \
     -S "$ROOT_DIR" \
     -B "$BUILD_DIR" \

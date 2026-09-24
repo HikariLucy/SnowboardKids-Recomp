@@ -21,10 +21,10 @@ mkdir -p "$DEPS_DIR"
 
 if [[ ! -d "$RUNTIME_DIR/.git" ]]; then
     git clone --recurse-submodules "$RUNTIME_REPO" "$RUNTIME_DIR"
+    git -C "$RUNTIME_DIR" checkout --detach "$RUNTIME_COMMIT"
 fi
 
-git -C "$RUNTIME_DIR" fetch origin "$RUNTIME_COMMIT" || git -C "$RUNTIME_DIR" fetch origin
-git -C "$RUNTIME_DIR" checkout --detach "$RUNTIME_COMMIT"
+python3 "$ROOT_DIR/scripts/dependency_patches.py" --only runtime
 git -C "$RUNTIME_DIR" submodule update --init --recursive
 
 echo

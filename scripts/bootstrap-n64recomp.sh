@@ -21,10 +21,10 @@ mkdir -p "$DEPS_DIR" "$BUILD_DIR"
 
 if [[ ! -d "$SRC_DIR/.git" ]]; then
     git clone --recurse-submodules "$N64RECOMP_REPO" "$SRC_DIR"
+    git -C "$SRC_DIR" checkout --detach "$N64RECOMP_COMMIT"
 fi
 
-git -C "$SRC_DIR" fetch origin "$N64RECOMP_COMMIT" || git -C "$SRC_DIR" fetch origin
-git -C "$SRC_DIR" checkout --detach "$N64RECOMP_COMMIT"
+python3 "$ROOT_DIR/scripts/dependency_patches.py" --only recomp
 git -C "$SRC_DIR" submodule update --init --recursive
 
 cmake -S "$SRC_DIR" -B "$BUILD_DIR" -G Ninja -DCMAKE_BUILD_TYPE=Release

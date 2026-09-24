@@ -15,7 +15,8 @@ if [[ ! -d "$ROOT_DIR/.deps-renderer/recomp-theme/.git" ]]; then
     bash "$ROOT_DIR/scripts/bootstrap-renderer-stack.sh"
 fi
 
-bash "$ROOT_DIR/scripts/apply-runtime-patches.sh"
+python3 "$ROOT_DIR/scripts/apply-continuation-patches.py"
+python3 "$ROOT_DIR/scripts/apply-quiescence-patches.py"
 
 echo "Regenerating N64Recomp output..."
 bash "$ROOT_DIR/scripts/run-recompiler.sh"
