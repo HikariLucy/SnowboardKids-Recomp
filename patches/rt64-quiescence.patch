@@ -1,0 +1,58 @@
+diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -84,6 +84,17 @@ namespace RT64 {
+         }
+     }
+
++    void WorkloadQueue::setQuiescence(bool requested) {
++        std::unique_lock<std::mutex> lock(idleMutex);
++        quiescenceRequested = requested;
++        idleCondition.notify_all();
++        if (requested) {
++            // condition_variable releases idleMutex while waiting for the idle
++            // worker to finish its current GPU operation and acknowledge.
++            idleCondition.wait(lock, [&] { return idleQuiescent || !threadsRunning; });
++        }
++    }
++
+     void WorkloadQueue::waitForIdle() {
+         std::unique_lock<std::mutex> threadLock(threadMutex);
+     }
+@@ -1209,8 +1220,15 @@ namespace RT64 {
+             {
+                 std::unique_lock<std::mutex> idleLock(idleMutex);
+                 idleCondition.wait(idleLock, [&]() {
+-                    return idleActive || !threadsRunning;
++                    return idleActive || quiescenceRequested || !threadsRunning;
+                 });
++                if (quiescenceRequested) {
++                    idleQuiescent = true;
++                    idleCondition.notify_all();
++                    idleCondition.wait(idleLock, [&] { return !quiescenceRequested || !threadsRunning; });
++                    idleQuiescent = false;
++                }
++                if (!idleActive && threadsRunning) continue;
+             }
+
+             if (threadsRunning) {
+diff --git a/src/hle/rt64_workload_queue.h b/src/hle/rt64_workload_queue.h
+--- a/src/hle/rt64_workload_queue.h
++++ b/src/hle/rt64_workload_queue.h
+@@ -74,6 +74,8 @@ namespace RT64 {
+         std::thread *renderThread = nullptr;
+         std::thread *idleThread = nullptr;
+         bool idleActive = false;
++        bool quiescenceRequested = false;
++        bool idleQuiescent = false;
+         std::mutex idleMutex;
+         std::condition_variable idleCondition;
+         std::mutex workerMutex;
+@@ -108,6 +110,7 @@ namespace RT64 {
+         void repeatLastWorkload();
+         uint32_t previousWriteCursor() const;
+         void waitForIdle();
++        void setQuiescence(bool requested);
+         void waitForWorkloadId(uint64_t waitId);
+         void setup(const External &ext);
+         void updateMultisampling();

@@ -245,6 +245,7 @@ if(SBK_BUILD_NATIVE_BOOT)
 
     add_executable(SnowboardKidsRecompiled
         "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
+        "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
@@ -303,4 +304,44 @@ if(SBK_BUILD_NATIVE_BOOT)
             "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
             "$<TARGET_FILE_DIR:SnowboardKidsRecompiled>/assets"
     )
+endif()
+
+# P2 coordinator remains inert unless SBK_P2_CYCLES is set at runtime.
+if(TARGET ultramodern)
+    file(STRINGS "${N64_RUNTIME_DIR}/ultramodern/src/events.cpp" P2_RUNTIME_HOOK
+        REGEX "quiescence::vi_boundary")
+    if(NOT P2_RUNTIME_HOOK)
+        message(FATAL_ERROR "P2 runtime patch missing. Run: python3 scripts/apply-quiescence-patches.py")
+    endif()
+    target_sources(ultramodern PRIVATE "${CMAKE_SOURCE_DIR}/src/quiescence/quiescence.cpp")
+    target_include_directories(ultramodern PUBLIC "${CMAKE_SOURCE_DIR}/src")
+endif()
+
+option(SBK_BUILD_QUIESCENCE_TESTS "Build the standalone P2 barrier stress tests" OFF)
+if(SBK_BUILD_QUIESCENCE_TESTS)
+    find_package(Threads REQUIRED)
+    enable_testing()
+    add_executable(SnowboardKidsQuiescenceTest
+        tests/quiescence/main.cpp src/quiescence/quiescence.cpp)
+    target_link_libraries(SnowboardKidsQuiescenceTest PRIVATE Threads::Threads)
+    target_include_directories(SnowboardKidsQuiescenceTest PRIVATE src)
+    add_test(NAME runtime_quiescence COMMAND SnowboardKidsQuiescenceTest)
+    set_tests_properties(runtime_quiescence PROPERTIES TIMEOUT 60)
+    add_executable(SnowboardKidsQuiescenceKernelTest
+        tests/quiescence/kernel.cpp src/quiescence/quiescence.cpp
+        "${N64_RUNTIME_DIR}/ultramodern/src/threads.cpp"
+        "${N64_RUNTIME_DIR}/ultramodern/src/threadqueue.cpp"
+        "${N64_RUNTIME_DIR}/ultramodern/src/scheduling.cpp"
+        "${N64_RUNTIME_DIR}/ultramodern/src/mesgqueue.cpp"
+        "${N64_RUNTIME_DIR}/ultramodern/src/timer.cpp")
+    target_include_directories(SnowboardKidsQuiescenceKernelTest PRIVATE src
+        "${N64_RUNTIME_DIR}/ultramodern/include" "${N64_RUNTIME_DIR}/thirdparty"
+        "${N64_RUNTIME_DIR}/thirdparty/concurrentqueue")
+    target_link_libraries(SnowboardKidsQuiescenceKernelTest PRIVATE Threads::Threads)
+    add_test(NAME runtime_quiescence_kernel COMMAND SnowboardKidsQuiescenceKernelTest)
+    add_test(NAME runtime_quiescence_kernel_baseline COMMAND SnowboardKidsQuiescenceKernelTest --baseline)
+    set_tests_properties(runtime_quiescence_kernel runtime_quiescence_kernel_baseline PROPERTIES TIMEOUT 60)
+endif()
+if(TARGET recompui)
+    target_include_directories(recompui PRIVATE "${CMAKE_SOURCE_DIR}/src")
 endif()

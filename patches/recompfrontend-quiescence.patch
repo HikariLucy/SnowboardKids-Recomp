@@ -1,0 +1,78 @@
+diff --git a/recompui/include/recompui/renderer.h b/recompui/include/recompui/renderer.h
+--- a/recompui/include/recompui/renderer.h
++++ b/recompui/include/recompui/renderer.h
+@@ -30,6 +30,8 @@ namespace recompui {
+             void send_dummy_workload(uint32_t fb_address) override;
+             void update_screen() override;
+             void shutdown() override;
++            bool drain_for_quiescence() override;
++            void resume_from_quiescence() override;
+             uint32_t get_display_framerate() const override;
+             float get_resolution_scale() const override;
+
+@@ -38,6 +40,7 @@ namespace recompui {
+             std::unordered_set<std::string> enabled_texture_packs;
+             std::unordered_set<std::string> secondary_disabled_texture_packs;
+             uint32_t last_refresh_rate = 0;
++            bool quiescent = false;
+
+             void check_texture_pack_actions();
+             void check_refresh_rate_changes();
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -1,9 +1,11 @@
++#include "quiescence/quiescence.hpp"
+ #include <memory>
+ #include <cstring>
+ #include <variant>
+ #include <algorithm>
+
+ #include "hle/rt64_application.h"
++#include "hle/rt64_state.h"
+ #include "rt64_render_hooks.h"
+ #include "overloaded.h"
+
+@@ -352,6 +354,42 @@ void renderer::RT64Context::update_screen() {
+     app->updateScreen();
+ }
+
++bool renderer::RT64Context::drain_for_quiescence() {
++    app->workloadQueue->waitForWorkloadId(app->state->workloadId);
++    app->presentQueue->waitForPresentId(app->state->presentId);
++    app->workloadQueue->waitForIdle();
++    app->presentQueue->waitForIdle();
++    app->workloadQueue->setQuiescence(true);
++    quiescent = true;
++    sbk::quiescence::note("renderer-idle", "park-ack");
++    // CPU queue IDs may advance before the final GPU submission finishes.
++    // Idle submissions are now parked; fence waits hold no renderer locks.
++    auto fence_queue = [&](RT64::RenderWorker* worker, const char* participant) {
++        // Plume's Vulkan wait resets a fence. Re-waiting a worker's already
++        // consumed fence (or an unused worker) deadlocks. Submit a fresh empty
++        // command list and private fence after all accepted work instead.
++        auto marker = worker->commandQueue->createCommandList();
++        auto fence = app->device->createCommandFence();
++        marker->begin();
++        marker->end();
++        worker->commandQueue->executeCommandLists(marker.get(), fence.get());
++        worker->commandQueue->waitForCommandFence(fence.get());
++        sbk::quiescence::note(participant, "fence-ack");
++    };
++    fence_queue(app->workloadGraphicsWorker.get(), "gpu-workload");
++    fence_queue(app->presentGraphicsWorker.get(), "gpu-present");
++    fence_queue(app->framebufferGraphicsWorker.get(), "gpu-framebuffer");
++    sbk::quiescence::note("renderer-gpu", "fences-complete");
++    return true;
++}
++
++void renderer::RT64Context::resume_from_quiescence() {
++    if (!quiescent) return;
++    quiescent = false;
++    sbk::quiescence::note("renderer-idle", "resume");
++    app->workloadQueue->setQuiescence(false);
++}
++
+ void renderer::RT64Context::shutdown() {
+     if (app != nullptr) {
+         app->end();

@@ -1,3 +1,4 @@
+#include "quiescence/probe.hpp"
 #include <algorithm>
 #include <array>
 #include <cinttypes>
@@ -251,6 +252,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
+    sbk::quiescence::probe_poll();
 }
 
 void queue_samples(int16_t* audio_data, size_t sample_count) {
@@ -359,6 +361,7 @@ void on_vi() {
 }
 
 bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
+    if (sbk::quiescence::probe_input(controller_num, buttons, x, y)) return true;
     if (controller_num < 0 || controller_num >= 4) {
         return false;
     }
@@ -400,6 +403,7 @@ std::string get_game_thread_name(const OSThread* thread) {
  } // namespace
 
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
+    sbk::quiescence::probe_memory(rdram);
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");
     std::fflush(stdout);
 
@@ -428,6 +432,9 @@ const char* validation_error_name(recomp::RomValidationError error) {
 } // namespace
 
 int main(int argc, char** argv) {
+    sbk::quiescence::probe_init(
+        [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); },
+        []() -> uint32_t { return audio_device ? SDL_GetQueuedAudioSize(audio_device) : 0; });
     install_crash_handlers();
 
     if (argc != 2) {
