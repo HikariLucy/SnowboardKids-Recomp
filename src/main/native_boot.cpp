@@ -2,6 +2,7 @@
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
 #include "continuation/runtime_owner.hpp"
+#include "savestate/dev_trigger.hpp"
 #endif
 #include <algorithm>
 #include <array>
@@ -192,6 +193,37 @@ static uint32_t output_channels = 2;
 constexpr uint32_t duplicated_input_frames = 4;
 static uint32_t discarded_output_frames = 0;
 constexpr uint32_t bytes_per_frame = input_channels * sizeof(float);
+static std::array<float, duplicated_input_frames * input_channels> duplicated_sample_buffer{};
+
+#ifdef SBK_CONTINUATIONS
+// P4 semantic audio boundary. SDL cannot read back queued PCM, so the most
+// recent submitted output bytes are mirrored here (bounded ring). At a Frozen
+// boundary the device is paused, so the queued byte count selects exactly the
+// not-yet-consumed backlog. Only this PCM (plus the conversion history) is
+// snapshot state; the SDL device itself is never serialized.
+class AudioLedger {
+    std::vector<uint8_t> ring_ = std::vector<uint8_t>(4 * 1024 * 1024);
+    size_t head_ = 0, filled_ = 0;
+public:
+    void append(const uint8_t* data, size_t size) {
+        for (size_t i = 0; i < size; ++i) ring_[(head_ + i) % ring_.size()] = data[i];
+        head_ = (head_ + size) % ring_.size();
+        filled_ = std::min(ring_.size(), filled_ + size);
+    }
+    bool tail(size_t size, std::vector<uint8_t>& out) const {
+        if (size > filled_) return false;
+        out.resize(size);
+        const size_t start = (head_ + ring_.size() - size) % ring_.size();
+        for (size_t i = 0; i < size; ++i) out[i] = ring_[(start + i) % ring_.size()];
+        return true;
+    }
+    void reset(const std::vector<uint8_t>& contents) {
+        head_ = filled_ = 0;
+        append(contents.data(), contents.size());
+    }
+};
+static AudioLedger audio_ledger;
+#endif
 
 void update_audio_converter() {
     const int ret = SDL_BuildAudioCVT(
@@ -281,6 +313,14 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
     sbk::quiescence::probe_poll();
 #ifdef SBK_CONTINUATIONS
+    if (sbk::savestate::dev::enabled()) {
+        // DEVELOPMENT ONLY hotkeys: read without consuming SDL events.
+        const Uint8* keys = SDL_GetKeyboardState(nullptr);
+        const bool ctrl = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+        sbk::savestate::dev::poll(ctrl && keys[SDL_SCANCODE_F6], ctrl && keys[SDL_SCANCODE_F7]);
+    }
+#endif
+#ifdef SBK_CONTINUATIONS
     static uint64_t s_frame_idx = 0;
     if (++s_frame_idx % 120 == 0) {
         std::fprintf(stderr, "P4A heartbeat frame=%llu live_owners=%zu total_owners=%llu total_dispatches=%llu startup_retired=%d\n",
@@ -299,7 +339,6 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     }
 
     static std::vector<float> swap_buffer;
-    static std::array<float, duplicated_input_frames * input_channels> duplicated_sample_buffer{};
 
     const size_t resampled_sample_count = sample_count + duplicated_input_frames * input_channels;
     const size_t max_sample_count =
@@ -348,7 +387,56 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
         swap_buffer.data() + output_channels * discarded_output_frames / 2;
 
     SDL_QueueAudio(audio_device, samples_to_queue, bytes_to_queue);
+#ifdef SBK_CONTINUATIONS
+    audio_ledger.append(reinterpret_cast<const uint8_t*>(samples_to_queue), bytes_to_queue);
+#endif
 }
+
+#ifdef SBK_CONTINUATIONS
+bool capture_host_audio(sbk::savestate::AudioState& state, std::string& error) {
+    if (audio_device == 0) { error = "no audio device"; return false; }
+    state.host_input_rate = sample_rate;
+    state.host_output_rate = output_sample_rate;
+    state.host_output_channels = output_channels;
+    state.host_history.clear();
+    for (float sample : duplicated_sample_buffer) {
+        uint32_t bits;
+        std::memcpy(&bits, &sample, sizeof(bits));
+        state.host_history.push_back(bits);
+    }
+    const uint32_t queued = SDL_GetQueuedAudioSize(audio_device);
+    if (!audio_ledger.tail(queued, state.host_backlog)) {
+        error = "queued audio exceeds the ledger";
+        return false;
+    }
+    return true;
+}
+
+bool install_host_audio(const sbk::savestate::AudioState& state, std::string& error) {
+    if (audio_device == 0) { error = "no audio device"; return false; }
+    if (state.host_output_rate != output_sample_rate || state.host_output_channels != output_channels) {
+        error = "audio device output format changed since capture";
+        return false;
+    }
+    // The guest frequency (and converter) was already restored by the domain.
+    if (state.host_input_rate != sample_rate || state.host_history.size() != duplicated_sample_buffer.size()) {
+        error = "audio conversion state shape mismatch";
+        return false;
+    }
+    for (size_t i = 0; i < duplicated_sample_buffer.size(); ++i)
+        std::memcpy(&duplicated_sample_buffer[i], &state.host_history[i], sizeof(float));
+    // Future audio of the abandoned timeline is dropped; the saved backlog is
+    // queued exactly once. The device stays paused until the barrier releases.
+    SDL_ClearQueuedAudio(audio_device);
+    if (!state.host_backlog.empty() &&
+        SDL_QueueAudio(audio_device, state.host_backlog.data(), static_cast<Uint32>(state.host_backlog.size())) != 0) {
+        error = SDL_GetError();
+        return false;
+    }
+    audio_ledger.reset(state.host_backlog);
+    return true;
+}
+#endif
 
 size_t get_frames_remaining() {
     if (audio_device == 0) {
@@ -442,6 +530,9 @@ std::string get_game_thread_name(const OSThread* thread) {
 
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     sbk::quiescence::probe_memory(rdram);
+#ifdef SBK_CONTINUATIONS
+    sbk::savestate::dev::set_memory(rdram);
+#endif
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");
     std::fflush(stdout);
 
@@ -474,6 +565,19 @@ int main(int argc, char** argv) {
         [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); },
         []() -> uint32_t { return audio_device ? SDL_GetQueuedAudioSize(audio_device) : 0; });
     install_crash_handlers();
+#ifdef SBK_CONTINUATIONS
+    {
+        // Snapshots restore only into the same generated corpus/manifest.
+        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
+        uint64_t digest = 14695981039346656037ull;
+        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
+        sbk::savestate::dev::Config config{};
+        config.build = {digest, 1981, 56};
+        config.audio = {capture_host_audio, install_host_audio};
+        config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
+        sbk::savestate::dev::init(config);
+    }
+#endif
 
     if (argc != 2) {
         std::fprintf(stderr, "usage: SnowboardKidsRecompiled <snowboardkids.z64>\n");

@@ -15,7 +15,7 @@ if(NOT EXISTS "${N64_RUNTIME_DIR}/librecomp/include/librecomp/rsp.hpp")
     )
 endif()
 
-option(SBK_CONTINUATIONS "Development-only explicit continuation backend (P4-A gate pending)" OFF)
+option(SBK_CONTINUATIONS "Explicit serializable continuation backend (P4-A validated)" OFF)
 set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/RecompiledFuncs")
 if(SBK_CONTINUATIONS)
     set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build-tools/production-continuation/corpus")
@@ -373,5 +373,15 @@ if(SBK_CONTINUATIONS)
     target_sources(SnowboardKidsRecompiled PRIVATE
         src/continuation/dispatch.cpp src/continuation/execution.cpp
         src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
+    # P4-B/P4-C in-memory savestates (development trigger only; no disk format).
+    file(STRINGS "${N64_RUNTIME_DIR}/ultramodern/src/threads.cpp" P4_SAVESTATE_HOOK
+        REGEX "spawn_restored_thread")
+    if(NOT P4_SAVESTATE_HOOK)
+        message(FATAL_ERROR "P4 savestate runtime patch missing. Run: python3 scripts/apply-continuation-patches.py")
+    endif()
+    target_sources(SnowboardKidsRecompiled PRIVATE
+        src/savestate/snapshot.cpp src/savestate/service.cpp
+        src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
+        src/savestate/dev_trigger.cpp)
     target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
 endif()
