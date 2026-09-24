@@ -1,19 +1,13 @@
 # P4 — complete in-memory savestate
 
-**P4-A STATUS:**
-**CODE-SIDE COMPLETE**
-**FINAL MANUAL RACE_FINISH GATE PENDING**
+**P4-A: PASS** (final manual race gate passed 2026-09-24).
+**P4-B CAPTURE: CODE-SIDE PASS. P4-C RESTORE: CODE-SIDE PASS.**
+**LIVE RESTORE GATE: PENDING HUMAN VALIDATION.**
 
-**DO NOT START P4-B CAPTURE/RESTORE UNTIL P4-A FINAL GATE PASSES.**
-
-Status updated: 2026-09-24. The P4 architecture is approved with the clarifications
-below. P4-A production continuation implementation is complete; overall P4-A
-acceptance remains **PENDING**, not PASS. P4-B snapshot capture/restore is not
-implemented or demonstrated and remains blocked. This documentation update ran
-no builds, ROM or live tests and made no code changes.
-
-See [P4-A production validation](P4-A-PRODUCTION-VALIDATION.md) for the confirmed
-evidence, pins, patch order and the sole remaining manual acceptance requirement.
+Implementation, measurements and limitations are recorded in
+[P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md). This document keeps the
+approved architecture; where it describes P4-B as blocked or not implemented,
+that text is historical (written before the P4-A gate passed).
 
 ## Objective and scope
 

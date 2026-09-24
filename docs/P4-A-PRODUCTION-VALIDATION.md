@@ -1,15 +1,30 @@
 # P4-A Production Continuations Validation
 
-**P4-A STATUS:**
-**CODE-SIDE COMPLETE**
-**FINAL MANUAL RACE_FINISH GATE PENDING**
+**P4-A STATUS: PASS** (final manual `race_finish` gate passed, 2026-09-24)
 
-**DO NOT START P4-B CAPTURE/RESTORE UNTIL P4-A FINAL GATE PASSES.**
+P4-B/P4-C are unblocked; see [P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md).
 
-Status frozen on 2026-09-24 for `feat/savestate-architecture`. This report records
-confirmed existing implementation and validation evidence. This documentation
-update did not compile, execute the game or ROM, or run live tests. P4-A overall
-acceptance is **PENDING**, not PASS.
+## Final manual gate — PASS (user-confirmed evidence)
+
+Reported by the user from the manual interactive run with the production
+continuation backend (`manifest_functions=1981`, `manifest_hle=56`):
+
+| Milestone / metric | Result |
+| --- | --- |
+| controller_pak, main menu, character select, course select | PASS |
+| interactive race, `race_active`, `race_finish` | PASS |
+| fallback / error markers | 0 |
+| `total_dispatches` | 893,426,396 |
+| `total_owners` | 6 |
+| `startup_retired` | 1 |
+
+The process later exited with status 139 because the user closed the window
+manually after the race. The teardown stack
+(`MQ_IS_EMPTY → do_recv → sbk::continuation::advance_hle → run_execution →
+run_thread_function`) is tracked separately as **SHUTDOWN-01** and does not
+invalidate P4-A.
+
+The sections below are the frozen code-side evidence recorded before the gate.
 
 ## Production continuations — complete
 
@@ -33,15 +48,10 @@ acceptance is **PENDING**, not PASS.
 | `race_active` | PASS |
 | Continuation dispatches | More than 208 million observed |
 | Native suspendable fallbacks | Zero observed |
-| `race_finish` | PENDING manual validation |
+| `race_finish` | PASS (final manual gate, user-confirmed) |
 
-The only remaining P4-A acceptance requirement is:
-
-- [ ] Play a full manual interactive race, observe `race_finish`, and confirm
+- [x] Play a full manual interactive race, observe `race_finish`, and confirm
   zero continuation fallbacks through race completion.
-
-Reaching `race_active` and passing the clean build do not establish
-`race_finish`. Do not mark P4-A fully PASS before that final observation.
 
 ## Reproducibility — complete
 
@@ -99,12 +109,10 @@ python3 tests/production_continuation/ownership_run.py
 python3 tests/production_continuation/run_flow.py
 ```
 
-## Frozen next action
+## Next action
 
-Only the final manual `race_finish` gate remains. No further P4-A implementation
-is pending in the old plan. P4-B capture, restore/load, rollback and snapshot
-triggers remain blocked until that gate passes. Snapshot implementation and
-full-game restorability are not claimed by this report.
+P4-A is complete. P4-B capture and P4-C restore are implemented code-side; the
+live restore gate is pending human validation (see the P4-B/P4-C report).
 
 See the [architecture](P4-IN-MEMORY-SAVESTATE.md) and the
 [updated implementation plan](superpowers/plans/2026-09-23-p4a-production-continuations.md).
