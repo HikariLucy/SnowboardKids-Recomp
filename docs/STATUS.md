@@ -1,6 +1,6 @@
 # Project Status
 
-Updated: 2026-09-23
+Updated: 2026-09-24
 
 ## Baseline validated
 
@@ -568,11 +568,21 @@ The diagnostic launcher keeps `SBK_PRESENT_MODE` overrides available for future 
 The in-game/frontend Options UI is also reachable, confirming that the RecompFrontend configuration modal is operational in the native port.
 
 
-## Current integration snapshot — 2026-09-23
+## Current integration snapshot — 2026-09-24
 
-The project is now in a playable native-port state. Earlier sections in this file remain historical implementation notes; this section describes the current frontier.
+Earlier sections in this document are retained as historical implementation notes. This section is the authoritative current frontier.
 
-### Playability / frontend
+## Global project status
+
+The project is a playable native Linux port with a strong technical foundation, but the product scope has expanded beyond the earlier native-port/R&D roadmap.
+
+**Approximate full-product maturity: ~52%.**
+
+The previous ~94% figure referred to a narrower technical roadmap and is retired. The current denominator includes full-game compatibility, modern controls, multiplayer, native savestates, mods, PC enhancements, release engineering and public-release readiness.
+
+See `docs/PROJECT-VISION.md` for the current product scope.
+
+## Playability / frontend
 
 Validated:
 
@@ -581,49 +591,85 @@ Validated:
 - RecompFrontend configuration UI;
 - keyboard input;
 - audible music/SFX;
-- menu progression;
 - Controller Pak warning flow;
-- character/course selection;
-- full race completion;
+- main menu;
+- character selection;
+- course selection;
+- full playable race;
 - Options UI;
 - Mods UI.
 
-The severe gameplay flicker was eliminated by using `PresentationMode::Console`. A shutdown-time message-queue backtrace remains tracked separately from gameplay stability.
+The severe gameplay flicker was eliminated by using `PresentationMode::Console`.
 
-### HD / 4K rendering
+Known remaining baseline issues include:
 
-Validated on `feat/graphics-resolution-presets` at:
+- shutdown-time message-queue teardown instability;
+- incomplete modern-controller analog/remapping validation;
+- incomplete full-game regression coverage.
 
-```text
-d6a5f60744e29f2e3fe7b4b36d3933ec55e5d202
-feat(graphics): add HD resolution presets and frontend fixes
-```
+## Graphics
 
-Presets:
+Validated:
 
-```text
-Original          1x    320x240
-480p              2x    640x480
-720p-class        3x    960x720
-1080p-class       4.5x  1440x1080
-1440p-class       6x    1920x1440
-2160p/4K-class    9x    2880x2160
-Auto              window-dependent integer scaling
-```
+- original 4:3 presentation;
+- Original 1x / 320x240;
+- 480p 2x / 640x480;
+- 720p-class 3x / 960x720;
+- 1080p-class 4.5x / 1440x1080;
+- 1440p-class 6x / 1920x1440;
+- 2160p / 4K-class 9x / 2880x2160;
+- Auto window-dependent integer scaling.
 
-The Mods crash found during frontend validation was fixed by assigning the stable SBK1 mod ID `snowboardkids` and updating RecompFrontend before configuration/game startup.
+New configurations default to the original 4:3 aspect ratio. True widescreen/ultrawide support is not yet implemented.
 
-### Native savestate research
+## Controls
 
-#### P1 — Serializable continuations: PASS
+Validated:
 
-Validated fresh-process restoration, guest registers/RDRAM equivalence, exactly-once resume, live locals, stable continuation IDs and both FR modes.
+- keyboard;
+- RecompInput path;
+- digital Xbox inputs including A, D-pad and Start.
 
-#### P1.5 — Continuation generalization/schema: PASS
+Pending:
 
-Validated audit/schema tests, fresh-process restore, sanitizer flow tests and cross-binary snapshot exchange. Full-game continuation integration remains pending.
+- Xbox analog rider control;
+- remapping UX;
+- deadzones;
+- rumble;
+- additional controller families;
+- multiplayer controller validation.
 
-#### P2 — Runtime quiescence: PASS
+## Mods
+
+Current state:
+
+- Mods UI: validated;
+- stable SBK1 `mod_game_id`: validated;
+- runtime/frontend mod framework: present;
+- SBK1 exports/hooks/events audit: pending;
+- first end-to-end SBK1 code mod: pending;
+- mod template: pending;
+- texture-pack validation: pending.
+
+The correct description remains **infrastructure-ready**, not fully validated end-to-end.
+
+## Native savestate research
+
+### P1 — Serializable continuations
+
+Status: **PASS**
+
+Validated isolated continuation feasibility, fresh-process restore, exactly-once resume, guest registers/RDRAM equivalence, stable continuation IDs, live locals and FR0/FR1 behavior.
+
+### P1.5 — Continuation schema/generalization
+
+Status: **PASS**
+
+Validated schema/auditor coverage, fresh-process restore, sanitizer flow and cross-binary snapshot exchange.
+
+### P2 — Runtime quiescence
+
+Status: **PASS**
 
 Validated state machine:
 
@@ -634,48 +680,125 @@ Idle -> Requested -> ParkGame -> CloseVI -> DrainDevices -> Frozen -> Resume -> 
 Measured coverage:
 
 - 600 synthetic coordinator cycles;
-- 41 actual runtime-kernel cycles;
+- 41 runtime-kernel cycles;
 - 660 live RT64/Vulkan gameplay cycles;
-- 0 timeouts;
-- 0 deadlocks;
-- 0 failed Frozen-state audits.
+- zero timeouts;
+- zero deadlocks;
+- zero failed Frozen-state audits.
 
-The runtime-kernel test held freezes for 60 ms, longer than the 40 ms guest timer deadline, and exercised a sender blocked on a full message queue. The guest transcript matched the unfrozen baseline.
-
-The live Frozen-state audit verified 8 MiB RDRAM, logical time and queued SDL audio remained unchanged across the freeze boundary.
-
-The stronger renderer drain exposed a Plume/Vulkan fence lifecycle issue: Plume resets a fence after waiting, so re-waiting a worker-owned fence can hang. The validated approach uses fresh queue markers with private fences instead of reusing worker fences or calling global `vkDeviceWaitIdle`.
-
-One P2 documentation item remains to reconcile before P3: the implementation summary names three RT64 GPU queues while a validation summary reports four fence acknowledgements. The actual participant mapping must be documented explicitly.
-
-### Savestate phase ownership
+Participant accounting is resolved as:
 
 ```text
-P1    Serializable continuations              PASS
-P1.5  Continuation generalization/schema      PASS
-P2    Runtime quiescence                      PASS
-P3    RT64 semantic graphics export/import    NEXT
-P4    Complete in-memory save/load            PENDING
-P5    Audio/timing restoration                PENDING
-P6    .sbks persistence                       PENDING
-P7    F5/F8 quick-save/load UX                PENDING
+3 GPU queues + 1 CPU renderer worker = 4 acknowledgements
 ```
 
-Scope correction: `.sbks` persistence belongs to **P6**, not P3.
+### P3 — RT64 semantic renderer export/import
 
-### Mods status
+Status: **PASS**
 
-The frontend/runtime mod infrastructure is present and the Mods tab works, but full SBK1 code-mod support has not yet been proven end-to-end.
+Persistent renderer state is exported/imported semantically. Raw SDL/Vulkan/RT64 host objects are not serialized.
 
-- Mods UI: validated;
-- stable SBK1 `mod_game_id`: validated;
-- SBK1 mod template: pending;
-- exports/hooks/events audit: pending;
-- first real SBK1 code mod: pending;
-- texture-pack validation: pending.
+### P3.1 — Framebuffer authority
 
-### Current technical frontier
+Status: **PASS**
 
-**P3 — RT64 semantic renderer state export/import** is the next high-risk task.
+Testing established that active framebuffer/depth content is frequently GPU-authoritative rather than equivalent to RDRAM.
 
-The goal is to export persistent N64 graphics state and GPU-authoritative framebuffer/depth contents at the proven P2 Frozen boundary, reconstruct them into fresh renderer resources, present the restored image without advancing guest time, and resume without reintroducing the flicker regression.
+Validated restoration includes:
+
+- GPU color readback/import;
+- GPU depth readback/import;
+- aspect-aware active-region handling;
+- preserved target dimensions/resolution scale;
+- protection against stale RDRAM framebuffer copies overwriting restored GPU state;
+- Original, Auto and 2160p validation.
+
+### P4-A — Production continuation backend
+
+Status: **CODE-SIDE COMPLETE; FINAL MANUAL GATE PENDING**
+
+The key gap discovered after P1/P1.5 was that the production executable still used ordinary native generated call stacks. P4-A addresses that gap.
+
+Validated code-side state:
+
+- 1,981 generated functions;
+- 56 HLE entries;
+- production continuation backend active in the real executable;
+- host-owned lifetime-checked execution-owner registry;
+- startup context permanently retired;
+- scheduler/blocking integration tests;
+- zero native suspendable fallbacks observed during real-game validation;
+- manual path through boot -> Controller Pak -> demo -> main menu -> character select -> course select -> interactive race_active;
+- more than 200 million continuation dispatches observed in one manual session;
+- normalized dependency patch series;
+- fresh patch application;
+- idempotent second application;
+- partial-state rejection;
+- wrong-upstream/pin rejection;
+- clean build from scratch with `SBK_CONTINUATIONS=ON`;
+- production continuation tests PASS;
+- 5 auditor tests PASS;
+- 6 schema tests PASS.
+
+Canonical patch ordering now includes:
+
+```text
+N64ModernRuntime:
+osStopThread -> quiescence -> continuations
+
+RecompFrontend:
+resolution -> quiescence
+```
+
+A temporary `diag_log` instrument used while investigating graphics/config behavior was explicitly classified as diagnostic-only and is not part of the reproducible patch chain.
+
+The **only remaining P4-A acceptance requirement** is a complete manual interactive race reaching `race_finish` with zero continuation fallbacks.
+
+**P4-B must not start until that final gate passes.**
+
+## Savestate phase ownership
+
+```text
+P1     Serializable continuation feasibility          PASS
+P1.5   Continuation schema/generalization             PASS
+P2     Runtime quiescence                             PASS
+P3     RT64 semantic renderer export/import           PASS
+P3.1   GPU-authoritative framebuffer restoration      PASS
+P4-A   Production continuation backend                FINAL MANUAL GATE PENDING
+P4-B   Semantic in-memory capture                     BLOCKED
+P4-C   Transactional restore                          PENDING
+P4-D   Real gameplay save/advance/load                PENDING
+P4-E   Stress/rollback/fault injection                PENDING
+P5     Audio/timing restoration fidelity              PENDING
+P6     Versioned .sbks persistence                    PENDING
+P7     F5/F8 quick-save/load UX                       PENDING
+```
+
+## Reproducibility
+
+The project now treats dependency modifications as project-owned reproducible patches rather than relying on dirty dependency trees.
+
+Validated behavior:
+
+- apply from pinned upstream revisions;
+- deterministic patch order;
+- idempotent second application;
+- full-file/permission comparison rather than weak marker detection;
+- explicit rejection of partially applied states;
+- explicit rejection of incompatible upstream/pin states;
+- clean build from scratch with production continuations enabled.
+
+## Current frontier
+
+Immediate priority:
+
+1. complete the final manual P4-A `race_finish` gate;
+2. only then begin P4-B semantic in-memory capture;
+3. continue through P4-C/P4-D/P4-E and P5-P7;
+4. expand full-game compatibility;
+5. complete controller/multiplayer support;
+6. build release engineering and CI;
+7. prove real SBK1 mod support;
+8. research widescreen and additional PC enhancements.
+
+Branch-qualified work remains distinct from merge status. In particular, current savestate implementation work lives on `feat/savestate-architecture` until merged.
