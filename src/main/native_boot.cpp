@@ -3,7 +3,9 @@
 #include "continuation/execution.hpp"
 #include "continuation/runtime_owner.hpp"
 #include "savestate/dev_trigger.hpp"
+#include "savestate/driver.hpp"
 #include "savestate/host_audio.hpp"
+#include "savestate/toast.hpp"
 #endif
 #include <algorithm>
 #include <array>
@@ -32,6 +34,7 @@
 #include "recompui/config.h"
 #include "recompui/renderer.h"
 #include "recompui/program_config.h"
+#include "recompui/recompui.h"
 #include "recomp_theme.h"
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
@@ -291,11 +294,24 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
     sbk::quiescence::probe_poll();
 #ifdef SBK_CONTINUATIONS
-    if (sbk::savestate::dev::enabled()) {
-        // DEVELOPMENT ONLY hotkeys: read without consuming SDL events.
+    if (sbk::savestate::driver::enabled()) {
+        // Hotkeys are read without consuming SDL events. F5/F8 (no modifier)
+        // are the user quick save/load; Ctrl+F6/Ctrl+F7 are DEVELOPMENT ONLY.
+        // Ignored while a frontend menu captures input.
+        static bool save_was_down = false, load_was_down = false;
         const Uint8* keys = SDL_GetKeyboardState(nullptr);
         const bool ctrl = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
+        const bool alt = keys[SDL_SCANCODE_LALT] || keys[SDL_SCANCODE_RALT];
+        const bool menu = recompui::is_context_capturing_input();
+        const bool save = keys[SDL_SCANCODE_F5] && !ctrl && !alt && !menu;
+        const bool load = keys[SDL_SCANCODE_F8] && !ctrl && !alt && !menu;
+        if (save && !save_was_down) sbk::savestate::driver::quick_save();
+        if (load && !load_was_down) sbk::savestate::driver::quick_load();
+        save_was_down = save;
+        load_was_down = load;
         sbk::savestate::dev::poll(ctrl && keys[SDL_SCANCODE_F6], ctrl && keys[SDL_SCANCODE_F7]);
+        sbk::savestate::driver::poll();
+        sbk::savestate::toast::update();
     }
 #endif
 #ifdef SBK_CONTINUATIONS
@@ -498,7 +514,7 @@ std::string get_game_thread_name(const OSThread* thread) {
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     sbk::quiescence::probe_memory(rdram);
 #ifdef SBK_CONTINUATIONS
-    sbk::savestate::dev::set_memory(rdram);
+    sbk::savestate::driver::set_memory(rdram);
 #endif
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");
     std::fflush(stdout);
@@ -532,20 +548,6 @@ int main(int argc, char** argv) {
         [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); },
         []() -> uint32_t { return audio_device ? SDL_GetQueuedAudioSize(audio_device) : 0; });
     install_crash_handlers();
-#ifdef SBK_CONTINUATIONS
-    {
-        // Snapshots restore only into the same generated corpus/manifest.
-        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
-        uint64_t digest = 14695981039346656037ull;
-        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
-        sbk::savestate::dev::Config config{};
-        config.build = {digest, 1981, 56};
-        config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
-        config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
-        sbk::savestate::dev::init(config);
-    }
-#endif
-
     if (argc != 2) {
         std::fprintf(stderr, "usage: SnowboardKidsRecompiled <snowboardkids.z64>\n");
         return EXIT_FAILURE;
@@ -585,6 +587,33 @@ int main(int argc, char** argv) {
     }
 
     sbk::register_overlays();
+
+#ifdef SBK_CONTINUATIONS
+    // Savestates (before runtime workers start). SBK_SAVESTATES=0 disables them;
+    // the P2 probe (SBK_P2_CYCLES) owns the barrier exclusively when set.
+    if (const char* flag = std::getenv("SBK_SAVESTATES"); flag && std::strcmp(flag, "0") == 0) {
+        std::fprintf(stderr, "SAVESTATE disabled by SBK_SAVESTATES=0\n");
+    } else if (std::getenv("SBK_P2_CYCLES")) {
+        std::fprintf(stderr, "SAVESTATE disabled: SBK_P2_CYCLES probe already drives the barrier\n");
+    } else {
+        // Snapshots restore only into the same generated corpus/manifest.
+        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
+        uint64_t digest = 14695981039346656037ull;
+        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
+        sbk::savestate::driver::Config config{};
+        config.build = {digest, 1981, 56};
+        config.rom_hash = game.rom_hash; // select_rom() verified the ROM against this XXH3-64
+        config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
+        config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
+        config.directory = recomp::get_config_path() / "savestates";
+        config.notify = [](sbk::savestate::driver::Notice notice) {
+            sbk::savestate::toast::show(sbk::savestate::driver::notice_text(notice),
+                sbk::savestate::driver::notice_is_error(notice));
+        };
+        sbk::savestate::driver::init(config);
+        sbk::savestate::dev::init();
+    }
+#endif
 
     recomp::rsp::callbacks_t rsp_callbacks{
         .get_rsp_microcode = get_rsp_microcode,
@@ -665,6 +694,7 @@ int main(int argc, char** argv) {
     );
 
 #ifdef SBK_CONTINUATIONS
+    sbk::savestate::driver::shutdown();
     std::fprintf(stderr, "P4A shutdown total_dispatches=%llu total_owners=%llu startup_retired=%d\n",
         (unsigned long long)sbk::continuation::total_dispatch_count(),
         (unsigned long long)sbk::continuation::total_registered_owners(),

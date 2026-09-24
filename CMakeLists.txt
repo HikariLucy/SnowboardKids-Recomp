@@ -373,7 +373,8 @@ if(SBK_CONTINUATIONS)
     target_sources(SnowboardKidsRecompiled PRIVATE
         src/continuation/dispatch.cpp src/continuation/execution.cpp
         src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
-    # P4-B/P4-C in-memory savestates (development trigger only; no disk format).
+    # P4 in-memory savestates, P5 audio boundary, P6 .sbks persistence and
+    # P7 quick save/load (F5/F8); development trigger behind SBK_P4_SAVESTATE_DEV.
     file(STRINGS "${N64_RUNTIME_DIR}/ultramodern/src/threads.cpp" P4_SAVESTATE_HOOK
         REGEX "spawn_restored_thread")
     if(NOT P4_SAVESTATE_HOOK)
@@ -382,6 +383,7 @@ if(SBK_CONTINUATIONS)
     target_sources(SnowboardKidsRecompiled PRIVATE
         src/savestate/snapshot.cpp src/savestate/service.cpp
         src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
-        src/savestate/host_audio.cpp src/savestate/sbks.cpp src/savestate/storage.cpp src/savestate/dev_trigger.cpp)
+        src/savestate/host_audio.cpp src/savestate/sbks.cpp src/savestate/storage.cpp
+        src/savestate/driver.cpp src/savestate/toast.cpp src/savestate/dev_trigger.cpp)
     target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
 endif()
