@@ -382,6 +382,6 @@ if(SBK_CONTINUATIONS)
     target_sources(SnowboardKidsRecompiled PRIVATE
         src/savestate/snapshot.cpp src/savestate/service.cpp
         src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
-        src/savestate/dev_trigger.cpp)
+        src/savestate/host_audio.cpp src/savestate/dev_trigger.cpp)
     target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
 endif()

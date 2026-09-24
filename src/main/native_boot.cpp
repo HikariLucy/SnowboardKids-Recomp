@@ -3,6 +3,7 @@
 #include "continuation/execution.hpp"
 #include "continuation/runtime_owner.hpp"
 #include "savestate/dev_trigger.hpp"
+#include "savestate/host_audio.hpp"
 #endif
 #include <algorithm>
 #include <array>
@@ -196,33 +197,10 @@ constexpr uint32_t bytes_per_frame = input_channels * sizeof(float);
 static std::array<float, duplicated_input_frames * input_channels> duplicated_sample_buffer{};
 
 #ifdef SBK_CONTINUATIONS
-// P4 semantic audio boundary. SDL cannot read back queued PCM, so the most
-// recent submitted output bytes are mirrored here (bounded ring). At a Frozen
-// boundary the device is paused, so the queued byte count selects exactly the
-// not-yet-consumed backlog. Only this PCM (plus the conversion history) is
-// snapshot state; the SDL device itself is never serialized.
-class AudioLedger {
-    std::vector<uint8_t> ring_ = std::vector<uint8_t>(4 * 1024 * 1024);
-    size_t head_ = 0, filled_ = 0;
-public:
-    void append(const uint8_t* data, size_t size) {
-        for (size_t i = 0; i < size; ++i) ring_[(head_ + i) % ring_.size()] = data[i];
-        head_ = (head_ + size) % ring_.size();
-        filled_ = std::min(ring_.size(), filled_ + size);
-    }
-    bool tail(size_t size, std::vector<uint8_t>& out) const {
-        if (size > filled_) return false;
-        out.resize(size);
-        const size_t start = (head_ + ring_.size() - size) % ring_.size();
-        for (size_t i = 0; i < size; ++i) out[i] = ring_[(start + i) % ring_.size()];
-        return true;
-    }
-    void reset(const std::vector<uint8_t>& contents) {
-        head_ = filled_ = 0;
-        append(contents.data(), contents.size());
-    }
-};
-static AudioLedger audio_ledger;
+// P4/P5 semantic audio boundary (src/savestate/host_audio.hpp): a bounded
+// mirror of submitted PCM selects the unconsumed backlog at a Frozen boundary.
+// The SDL device itself is never serialized.
+static sbk::savestate::audio::Boundary audio_boundary;
 #endif
 
 void update_audio_converter() {
@@ -386,55 +364,44 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     float* samples_to_queue =
         swap_buffer.data() + output_channels * discarded_output_frames / 2;
 
-    SDL_QueueAudio(audio_device, samples_to_queue, bytes_to_queue);
+    const bool queued = SDL_QueueAudio(audio_device, samples_to_queue, bytes_to_queue) == 0;
 #ifdef SBK_CONTINUATIONS
-    audio_ledger.append(reinterpret_cast<const uint8_t*>(samples_to_queue), bytes_to_queue);
+    // Mirror only what SDL accepted, so the ledger never runs ahead of the queue.
+    if (queued) audio_boundary.submitted(reinterpret_cast<const uint8_t*>(samples_to_queue), bytes_to_queue);
+#else
+    (void)queued;
 #endif
 }
 
 #ifdef SBK_CONTINUATIONS
+sbk::savestate::audio::DeviceFormat host_audio_format() {
+    return {sample_rate, output_sample_rate, output_channels};
+}
+
 bool capture_host_audio(sbk::savestate::AudioState& state, std::string& error) {
     if (audio_device == 0) { error = "no audio device"; return false; }
-    state.host_input_rate = sample_rate;
-    state.host_output_rate = output_sample_rate;
-    state.host_output_channels = output_channels;
-    state.host_history.clear();
-    for (float sample : duplicated_sample_buffer) {
-        uint32_t bits;
-        std::memcpy(&bits, &sample, sizeof(bits));
-        state.host_history.push_back(bits);
-    }
-    const uint32_t queued = SDL_GetQueuedAudioSize(audio_device);
-    if (!audio_ledger.tail(queued, state.host_backlog)) {
-        error = "queued audio exceeds the ledger";
-        return false;
-    }
-    return true;
+    // The device is paused at CloseVI: the queue size is the exact backlog.
+    return audio_boundary.capture(host_audio_format(), duplicated_sample_buffer,
+        SDL_GetQueuedAudioSize(audio_device), state, error);
+}
+
+bool validate_host_audio(const sbk::savestate::AudioState& state, std::string& error) {
+    if (audio_device == 0) { error = "no audio device"; return false; }
+    return audio_boundary.validate(state, host_audio_format(), duplicated_sample_buffer.size(), error);
 }
 
 bool install_host_audio(const sbk::savestate::AudioState& state, std::string& error) {
     if (audio_device == 0) { error = "no audio device"; return false; }
-    if (state.host_output_rate != output_sample_rate || state.host_output_channels != output_channels) {
-        error = "audio device output format changed since capture";
-        return false;
-    }
+    const sbk::savestate::audio::HostQueue queue{
+        [] { return SDL_GetQueuedAudioSize(audio_device); },
+        [] { SDL_ClearQueuedAudio(audio_device); },
+        [](const uint8_t* data, uint32_t size, std::string& why) {
+            if (SDL_QueueAudio(audio_device, data, size) == 0) return true;
+            why = SDL_GetError();
+            return false;
+        }};
     // The guest frequency (and converter) was already restored by the domain.
-    if (state.host_input_rate != sample_rate || state.host_history.size() != duplicated_sample_buffer.size()) {
-        error = "audio conversion state shape mismatch";
-        return false;
-    }
-    for (size_t i = 0; i < duplicated_sample_buffer.size(); ++i)
-        std::memcpy(&duplicated_sample_buffer[i], &state.host_history[i], sizeof(float));
-    // Future audio of the abandoned timeline is dropped; the saved backlog is
-    // queued exactly once. The device stays paused until the barrier releases.
-    SDL_ClearQueuedAudio(audio_device);
-    if (!state.host_backlog.empty() &&
-        SDL_QueueAudio(audio_device, state.host_backlog.data(), static_cast<Uint32>(state.host_backlog.size())) != 0) {
-        error = SDL_GetError();
-        return false;
-    }
-    audio_ledger.reset(state.host_backlog);
-    return true;
+    return audio_boundary.install(state, host_audio_format(), duplicated_sample_buffer, queue, error);
 }
 #endif
 
@@ -573,7 +540,7 @@ int main(int argc, char** argv) {
         for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
         sbk::savestate::dev::Config config{};
         config.build = {digest, 1981, 56};
-        config.audio = {capture_host_audio, install_host_audio};
+        config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
         config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
         sbk::savestate::dev::init(config);
     }

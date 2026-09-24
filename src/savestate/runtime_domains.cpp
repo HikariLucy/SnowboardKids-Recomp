@@ -297,6 +297,7 @@ bool AudioDomain::validate(const InMemorySnapshot& in, std::string& error) const
         error = "host audio adapter availability differs from the snapshot";
         return false;
     }
+    if (in.audio.host_present && host_.validate) return host_.validate(in.audio, error);
     return true;
 }
 

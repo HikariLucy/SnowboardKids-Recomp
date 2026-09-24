@@ -47,6 +47,8 @@ public:
 struct HostAudio {
     std::function<bool(AudioState&, std::string&)> capture;
     std::function<bool(const AudioState&, std::string&)> install;
+    // Optional pre-mutation check (device format, backlog shape).
+    std::function<bool(const AudioState&, std::string&)> validate;
 };
 class AudioDomain final : public Domain {
 public:
