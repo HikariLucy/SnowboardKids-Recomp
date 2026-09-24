@@ -202,6 +202,11 @@ to the repository's.
 
 ## P4 / P5 audio boundary
 
+> Update: the P5 boundary is now a tested unit (`src/savestate/host_audio.*`)
+> with pre-mutation validation and an explicit flush-then-requeue-once
+> policy; see [P6 — P5 audio boundary](P6-PERSISTENT-SAVESTATE.md#p5-audio-boundary).
+> The text below is the original P4 description.
+
 P4 captures the not-yet-consumed PCM backlog (mirrored in a bounded ledger
 because SDL cannot read back queued audio; the device is paused at CloseVI so
 the queued byte count selects the exact backlog), the conversion history and
@@ -217,6 +222,8 @@ rolls back.
 
 - Persistent save media (controller pak / EEPROM buffers and files) are not
   rewound by a restore; loading an older state does not rewrite save files.
+  In this build no such file exists (Controller Pak HLE reports no pak, save
+  type None); see [P6 — Controller Pak policy](P6-PERSISTENT-SAVESTATE.md#controller-pak--save-media-policy).
 - Rumble motor state is host output only and is not restored.
 - A capture is rejected (retry later) if an owner is parked inside a
   non-message native HLE, a scheduler signal stays in flight, or a guest
@@ -224,6 +231,12 @@ rolls back.
 - Restore rejects snapshots from a different corpus/build or adapter set.
 
 ## Development trigger (DEVELOPMENT ONLY)
+
+> Update: the trigger is now an input source for the shared savestate driver
+> (`src/savestate/driver.*`), which also runs the user quick save/load (F5/F8,
+> [P7](P7-SAVESTATE-UX.md)). Keys, log lines and control-file commands below
+> are unchanged; the control file additionally accepts `<seq> quicksave [slot]`
+> and `<seq> quickload [slot]`.
 
 `SBK_P4_SAVESTATE_DEV=1` enables the coordinator and the driver (refused if
 `SBK_P2_CYCLES` is set). Ctrl+F6 captures, Ctrl+F7 restores (window focus
@@ -270,9 +283,16 @@ user reported. They were not measured by the implementing agent.
 | continuation fallbacks/errors | 0 |
 | gameplay ≥ 20 s after restore | PASS |
 
-## SHUTDOWN-01 (backlog, not addressed)
+## SHUTDOWN-01
 
 Manual application exit may SIGSEGV during teardown:
 `MQ_IS_EMPTY → do_recv → sbk::continuation::advance_hle → run_execution →
 run_thread_function`. Observed after the P4-A race gate when the user closed
-the window. It does not affect capture/restore and was not changed here.
+the window, and again after the P4-C live gate. It does not affect
+capture/restore.
+
+Update: diagnosed as a use-after-unmap (RDRAM unmapped by `recomp::start`
+while detached guest workers still ran) and fixed code-side by
+`n64modernruntime-shutdown.patch` plus `_Exit` in `main`; live confirmation is
+part of the P6/P7 gate. Details in
+[P6 — SHUTDOWN-01](P6-PERSISTENT-SAVESTATE.md#shutdown-01).

@@ -6,7 +6,9 @@ by user, 2026-09-24: capture → ≥20 s play → restore → ≥20 s play, all 
 hashes equal, 0 failures).
 
 Implementation, measurements and limitations are recorded in
-[P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md). This document keeps the
+[P4-B/P4-C validation](P4-BC-SAVESTATE-VALIDATION.md). Persistence (`.sbks`,
+code-side PASS, live pending) and the quick save/load UX are in
+[P6](P6-PERSISTENT-SAVESTATE.md) and [P7](P7-SAVESTATE-UX.md). This document keeps the
 approved architecture; where it describes P4-B as blocked or not implemented,
 that text is historical (written before the P4-A gate passed).
 
