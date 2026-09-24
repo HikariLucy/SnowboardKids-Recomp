@@ -17,7 +17,8 @@ SERIES = {
                 '6ccb2e7c2e7f6708257b461097e0aaf03c445e2a', (
                     'n64modernruntime-osstopthread.patch',
                     'n64modernruntime-quiescence.patch',
-                    'n64modernruntime-continuations.patch')),
+                    'n64modernruntime-continuations.patch',
+                    'n64modernruntime-savestate.patch')),
     'recomp': ('.deps/N64Recomp',
                'ffb39cdad1da5de07eaaa48bd1db4a89a7986771', (
                    'n64recomp-continuations.patch',)),

@@ -39,6 +39,18 @@ void print_manual_summary() {
     std::fflush(stderr);
 }
 
+void check_queue(uint8_t* rdram, Execution& e) {
+    e.pending=PendingOp::CheckQueue;
+    if(ultramodern::this_thread()) ultramodern::check_running_queue(rdram);
+    e.pending=PendingOp::None;
+}
+
+void pause(uint8_t* rdram, Execution& e) {
+    e.pending=PendingOp::Pause;
+    ultramodern::wait_for_external_message(rdram);
+    check_queue(rdram,e);
+}
+
 void bind_cpu(Execution& execution) {
     auto& cpu=execution.cpu;
     cpu.f_odd=cpu.mips3_float_mode?&cpu.f1.u32l:&cpu.f0.u32h;
@@ -70,7 +82,7 @@ void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
             if(result==HleResult::WaitNext) {
                 ultramodern::run_next_thread_and_wait(rdram);
             } else if(result==HleResult::CheckQueue) {
-                if(ultramodern::this_thread()) ultramodern::check_running_queue(rdram);
+                check_queue(rdram,e);
             } else {
                 const bool tail=e.blocked.tail;
                 e.blocked={};
@@ -162,8 +174,7 @@ void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
         case ActionKind::Yield:
             sbk::quiescence::game_safepoint();break;
         case ActionKind::Pause:
-            ultramodern::wait_for_external_message(rdram);
-            if(ultramodern::this_thread()) ultramodern::check_running_queue(rdram);
+            pause(rdram,e);
             break;
         default:
             std::fprintf(stderr, "P4A rejected unresolved continuation transfer: kind=%d target=%llu\n", (int)action.kind, (unsigned long long)action.target);
@@ -172,6 +183,16 @@ void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
     }
     e.finished=true;
     std::fprintf(stderr,"P4A owner finished steps=%llu\n",(unsigned long long)e.dispatch_count);
+}
+void resume_execution(uint8_t* rdram,Execution& e) {
+    if(!e.started || e.finished) throw std::logic_error("Only a started, unfinished execution can resume");
+    switch(e.pending) {
+    case PendingOp::None: break;
+    case PendingOp::CheckQueue: check_queue(rdram,e); break;
+    case PendingOp::Pause: pause(rdram,e); break;
+    default: throw std::runtime_error("Invalid pending scheduler operation");
+    }
+    run_execution(rdram,e,0);
 }
 void enter(uint64_t id,uint8_t* rdram,recomp_context* context) {
     if(dispatching || current_execution()) throw std::runtime_error("Native generated callback is forbidden");

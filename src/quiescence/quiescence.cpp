@@ -16,7 +16,11 @@ std::condition_variable changed;
 State state = State::Idle;
 uint64_t generation = 0, sequence = 0, next_owner = 0;
 size_t waiters = 0;
-struct ExecutionOwner { uint64_t guest; bool active; };
+struct ExecutionOwner {
+    uint64_t guest; bool active;
+    Site site = Site::Active;
+    bool signaled = false, retired = false;
+};
 std::map<uint64_t, ExecutionOwner> owners;
 thread_local uint64_t owner = 0;
 std::array<uint64_t, 2> pending{};
@@ -27,6 +31,8 @@ Clock::time_point pause_start;
 Clock::duration excluded{};
 std::string failure;
 void (*audio_callback)(bool) = nullptr;
+[[noreturn]] void default_retire_thrower() { throw owner_retired{}; }
+void (*retire_thrower)() = default_retire_thrower;
 void record(const char* who, const char* operation, uint64_t detail = 0) {
     // Bounded diagnostic ring, not a replay log or snapshot.
     if (records.size() == 32768) records.pop_front();
@@ -38,10 +44,21 @@ void transition(State next) {
     changed.notify_all();
 }
 bool busy() { return state != State::Idle && state != State::Resume; }
+bool retired_self() {
+    if (!owner) return false;
+    auto it = owners.find(owner);
+    return it != owners.end() && it->second.retired;
+}
 void park_wait(std::unique_lock<std::mutex>& lock) {
     ++waiters;
-    changed.wait(lock, [] { return !busy(); });
+    changed.wait(lock, [] { return !busy() || retired_self(); });
     --waiters;
+}
+// Leaves through the registered thrower; the unique_lock unwinds normally.
+void leave_if_retired() {
+    if (!retired_self()) return;
+    record("game", "retired-exit", owner);
+    retire_thrower();
 }
 void release(std::unique_lock<std::mutex>& lock) {
     // Keep owners parked until clocks/audio are rebased. Resume is observable
@@ -63,7 +80,7 @@ void release(std::unique_lock<std::mutex>& lock) {
 }
 }
 const char* name(State s) {
-    constexpr const char* names[]{"Idle", "Requested", "ParkGame", "CloseVI", "DrainDevices", "Frozen", "Resume"};
+    constexpr const char* names[]{"Idle", "Requested", "ParkGame", "CloseVI", "DrainDevices", "Frozen", "Resume", "Capture", "Restore"};
     return names[static_cast<unsigned>(s)];
 }
 void enable() { on = true; }
@@ -93,7 +110,8 @@ Status status() {
 std::vector<OwnerStatus> owner_status() {
     std::lock_guard lock(mutex);
     std::vector<OwnerStatus> result;
-    for (auto [token, entry] : owners) result.push_back({token, entry.guest, entry.active});
+    for (auto [token, entry] : owners)
+        result.push_back({token, entry.guest, entry.active, entry.site, entry.signaled, entry.retired});
     return result;
 }
 std::vector<Trace> trace() { std::lock_guard lock(mutex); return {records.begin(), records.end()}; }
@@ -143,15 +161,18 @@ void owner_enter(uint64_t guest) {
     if (!enabled()) return;
     std::unique_lock lock(mutex);
     if (owner) throw std::logic_error("nested P2 execution owner");
-    if (busy() && state != State::ParkGame)
+    const bool restoring = state == State::Restore;
+    if (busy() && state != State::ParkGame && !restoring)
         throw std::logic_error("P2 owner created after game admission closed");
     owner = ++next_owner;
     owners.emplace(owner, ExecutionOwner{guest, false});
-    record("game", "register", owner);
+    record("game", restoring ? "register-restored" : "register", owner);
     record("game", "guest-address", guest);
     // Creation runs before osCreateThread releases its initialized handshake.
     // The creating owner remains active until this owner reaches its semaphore.
-    owners.at(owner).active = true;
+    // A reconstructed owner is dormant from birth: it may only reach its
+    // semaphore or its restored park while the barrier stays closed.
+    owners.at(owner).active = !restoring;
 }
 void owner_leave() {
     if (!owner) return;
@@ -161,23 +182,60 @@ void owner_leave() {
 void owner_sleep() {
     if (!owner) return;
     std::lock_guard lock(mutex);
-    owners.at(owner).active = false; record("game", "scheduler-wait", owner);
+    auto& self = owners.at(owner);
+    self.active = false; self.site = Site::Sleeping;
+    record("game", "scheduler-wait", owner);
 }
 void owner_wake() {
     if (!owner) return;
     std::unique_lock lock(mutex);
-    if (busy()) park_wait(lock);
-    owners.at(owner).active = true; record("game", "scheduler-wake", owner);
+    auto& self = owners.at(owner);
+    self.signaled = false;
+    leave_if_retired();
+    if (busy()) {
+        self.site = Site::ParkedWake;
+        park_wait(lock);
+        leave_if_retired();
+    }
+    self.active = true; self.site = Site::Active;
+    record("game", "scheduler-wake", owner);
 }
 void game_safepoint() {
     if (!owner) return;
     std::unique_lock lock(mutex);
     if (!busy()) return;
-    owners.at(owner).active = false;
+    auto& self = owners.at(owner);
+    self.active = false; self.site = Site::ParkedSafepoint;
     record("game", "park-ack", owner);
     park_wait(lock);
-    owners.at(owner).active = true;
+    leave_if_retired();
+    self.active = true; self.site = Site::Active;
     record("game", "same-owner-resumed", owner);
+}
+void owner_signal(uint64_t guest) {
+    if (!enabled()) return;
+    std::lock_guard lock(mutex);
+    for (auto& [token, entry] : owners) if (entry.guest == guest && !entry.retired) entry.signaled = true;
+}
+void restored_owner_park() {
+    if (!owner) return;
+    std::unique_lock lock(mutex);
+    auto& self = owners.at(owner);
+    self.active = false; self.site = Site::ParkedRestored;
+    record("game", "restored-park", owner);
+    park_wait(lock);
+    leave_if_retired();
+    self.active = true; self.site = Site::Active;
+    record("game", "restored-owner-released", owner);
+}
+bool owners_settled() {
+    std::lock_guard lock(mutex);
+    for (auto& [token, entry] : owners) {
+        if (entry.retired) continue;
+        if (entry.active || entry.site == Site::Active) return false;
+        if (entry.site == Site::Sleeping && entry.signaled) return false;
+    }
+    return true;
 }
 void vi_boundary() {
     if (!enabled()) return;
@@ -208,7 +266,8 @@ bool try_accept_config() {
 void accepted(Device device) {
     if (!enabled()) return;
     std::lock_guard lock(mutex);
-    if (state == State::Frozen || state == State::DrainDevices)
+    if (state == State::Frozen || state == State::DrainDevices ||
+        state == State::Capture || state == State::Restore)
         throw std::logic_error("P2 task admitted after producers closed");
     auto index = static_cast<size_t>(device);
     record(index ? "graphics" : "rsp", "accepted", ++pending[index]);
@@ -243,5 +302,40 @@ Clock::duration excluded_wall_time() {
     if (!enabled()) return Clock::duration::zero();
     std::lock_guard lock(mutex);
     return excluded + (clock_paused ? Clock::now() - pause_start : Clock::duration::zero());
+}
+bool begin_transaction(uint64_t gen, State kind) {
+    if (kind != State::Capture && kind != State::Restore) return false;
+    std::lock_guard lock(mutex);
+    if (state != State::Frozen || generation != gen) return false;
+    transition(kind);
+    return true;
+}
+bool end_transaction(uint64_t gen) {
+    std::lock_guard lock(mutex);
+    if ((state != State::Capture && state != State::Restore) || generation != gen) return false;
+    transition(State::Frozen);
+    return true;
+}
+size_t retire_owners() {
+    std::lock_guard lock(mutex);
+    if (state != State::Restore) throw std::logic_error("owners retire only inside a Restore transaction");
+    size_t count = 0;
+    for (auto& [token, entry] : owners) {
+        if (!entry.retired) { entry.retired = true; ++count; record("game", "retire-requested", token); }
+    }
+    changed.notify_all();
+    return count;
+}
+size_t owner_count() { std::lock_guard lock(mutex); return owners.size(); }
+void set_retire_thrower(void (*thrower)()) {
+    std::lock_guard lock(mutex);
+    retire_thrower = thrower ? thrower : default_retire_thrower;
+}
+bool rebase_logical_clock(Clock::time_point logical) {
+    std::lock_guard lock(mutex);
+    if (!clock_paused) return false;
+    excluded = pause_start - logical;
+    record("clock", "rebase");
+    return true;
 }
 }

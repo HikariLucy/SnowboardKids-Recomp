@@ -29,6 +29,19 @@ struct ActiveScope {
 };
 }
 bool hle_active() { return active; }
+bool hle_known(uint64_t id) {
+    for (const auto& entry : entries) if (entry.id == id) return true;
+    return false;
+}
+bool hle_replayable_from_safepoint(uint64_t id) {
+    // Message HLEs reach their only safepoint in dequeue_external_messages,
+    // before any guest-visible effect. Leaf/scheduled handlers may not.
+    for (const auto& entry : entries) {
+        if (entry.id == id)
+            return entry.kind == Kind::Receive || entry.kind == Kind::Send || entry.kind == Kind::Jam;
+    }
+    return false;
+}
 uint64_t hle_id_for_token(recomp_func_t* token) {
     for (const auto& entry : entries) if (entry.function == token) return entry.id;
     return 0;
