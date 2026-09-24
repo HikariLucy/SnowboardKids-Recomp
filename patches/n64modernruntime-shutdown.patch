@@ -1,0 +1,25 @@
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -917,17 +917,9 @@
+     ultramodern::join_thread_cleaner_thread();
+     ultramodern::join_saving_thread();
+     
+-    // Free rdram.
+-    bool free_failed;
+-#ifdef _WIN32
+-    // VirtualFree returns zero on failure.
+-    free_failed = (VirtualFree(rdram, 0, MEM_RELEASE) == 0);
+-#else
+-    // munmap returns -1 on failure.
+-    free_failed = (munmap(rdram, allocation_size) == -1);
+-#endif
+-
+-    if (free_failed) {
+-        printf("Failed to free rdram\n");
+-    }
++    // RDRAM stays mapped until the process exits. Guest threads run on detached
++    // workers that are never joined here; one may still be inside an HLE (for
++    // example a message receive) that reads guest memory. Unmapping here made
++    // that access fault during teardown. The OS reclaims the mapping at exit.
++    (void)allocation_size;
+ }

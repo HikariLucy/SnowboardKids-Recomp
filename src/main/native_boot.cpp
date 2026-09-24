@@ -702,5 +702,8 @@ int main(int argc, char** argv) {
 #endif
 
     SDL_Quit();
-    return EXIT_SUCCESS;
+    // Guest threads run on detached workers that are never joined. Skip static
+    // destructors (registries, queues) they may still reference (SHUTDOWN-01).
+    std::fflush(nullptr);
+    std::_Exit(EXIT_SUCCESS);
 }

@@ -380,6 +380,10 @@ if(SBK_CONTINUATIONS)
     if(NOT P4_SAVESTATE_HOOK)
         message(FATAL_ERROR "P4 savestate runtime patch missing. Run: python3 scripts/apply-continuation-patches.py")
     endif()
+    file(STRINGS "${N64_RUNTIME_DIR}/librecomp/src/recomp.cpp" SBK_SHUTDOWN_PATCH REGEX "RDRAM stays mapped")
+    if(NOT SBK_SHUTDOWN_PATCH)
+        message(FATAL_ERROR "Runtime shutdown patch missing. Run: python3 scripts/apply-continuation-patches.py")
+    endif()
     target_sources(SnowboardKidsRecompiled PRIVATE
         src/savestate/snapshot.cpp src/savestate/service.cpp
         src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
