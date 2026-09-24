@@ -1,7 +1,11 @@
 #include <cstddef>
 
 #include "librecomp/overlays.hpp"
+#ifdef SBK_CONTINUATIONS
+#include "recomp_overlays.inl"
+#else
 #include "../../RecompiledFuncs/recomp_overlays.inl"
+#endif
 
 namespace sbk {
 

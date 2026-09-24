@@ -1,4 +1,8 @@
 #include "quiescence/probe.hpp"
+#ifdef SBK_CONTINUATIONS
+#include "continuation/execution.hpp"
+#include "continuation/runtime_owner.hpp"
+#endif
 #include <algorithm>
 #include <array>
 #include <cinttypes>
@@ -276,6 +280,17 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
     sbk::quiescence::probe_poll();
+#ifdef SBK_CONTINUATIONS
+    static uint64_t s_frame_idx = 0;
+    if (++s_frame_idx % 120 == 0) {
+        std::fprintf(stderr, "P4A heartbeat frame=%llu live_owners=%zu total_owners=%llu total_dispatches=%llu startup_retired=%d\n",
+            (unsigned long long)s_frame_idx,
+            sbk::continuation::live_owner_count(),
+            (unsigned long long)sbk::continuation::total_registered_owners(),
+            (unsigned long long)sbk::continuation::total_dispatch_count(),
+            sbk::continuation::startup_is_retired() ? 1 : 0);
+    }
+#endif
 }
 
 void queue_samples(int16_t* audio_data, size_t sample_count) {
@@ -555,6 +570,12 @@ int main(int argc, char** argv) {
     std::puts("Starting N64ModernRuntime...");
     std::fflush(stdout);
 
+#ifdef SBK_CONTINUATIONS
+    std::fprintf(stderr, "P4A backend=continuation manifest_functions=1981 manifest_hle=56 corpus_sha256=76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43\n");
+#else
+    std::fprintf(stderr, "P4A backend=ordinary\n");
+#endif
+
     // Do not call start_game() before the runtime starts. N64ModernRuntime's
     // VI thread needs one dummy retrace to seed a valid VI mode/framebuffer.
     // The first VI callback above starts the game immediately after that safe
@@ -571,6 +592,13 @@ int main(int argc, char** argv) {
         error_callbacks,
         thread_callbacks
     );
+
+#ifdef SBK_CONTINUATIONS
+    std::fprintf(stderr, "P4A shutdown total_dispatches=%llu total_owners=%llu startup_retired=%d\n",
+        (unsigned long long)sbk::continuation::total_dispatch_count(),
+        (unsigned long long)sbk::continuation::total_registered_owners(),
+        sbk::continuation::startup_is_retired() ? 1 : 0);
+#endif
 
     SDL_Quit();
     return EXIT_SUCCESS;

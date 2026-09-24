@@ -15,11 +15,20 @@ if(NOT EXISTS "${N64_RUNTIME_DIR}/librecomp/include/librecomp/rsp.hpp")
     )
 endif()
 
+option(SBK_CONTINUATIONS "Development-only explicit continuation backend (P4-A gate pending)" OFF)
+set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/RecompiledFuncs")
+if(SBK_CONTINUATIONS)
+    set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build-tools/production-continuation/corpus")
+    if(NOT EXISTS "${CMAKE_SOURCE_DIR}/build-tools/production-continuation/manifest.tsv")
+        message(FATAL_ERROR "Generate P4-A corpus first: tests/production_continuation/generate_corpus.py")
+    endif()
+endif()
+
 file(GLOB RECOMPILED_CPU_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/RecompiledFuncs/*.c"
+    "${SBK_CPU_OUTPUT_DIR}/*.c"
 )
 file(GLOB RECOMPILED_CPU_CXX_SOURCES CONFIGURE_DEPENDS
-    "${CMAKE_SOURCE_DIR}/RecompiledFuncs/*.cpp"
+    "${SBK_CPU_OUTPUT_DIR}/*.cpp"
 )
 
 if(NOT RECOMPILED_CPU_SOURCES)
@@ -32,6 +41,10 @@ if(NOT EXISTS "${CMAKE_SOURCE_DIR}/rsp/aspMain.cpp")
     message(FATAL_ERROR
         "rsp/aspMain.cpp is missing. Run: bash scripts/run-rsp-recompiler.sh"
     )
+endif()
+
+if(SBK_CONTINUATIONS)
+    set_source_files_properties(${RECOMPILED_CPU_SOURCES} PROPERTIES LANGUAGE CXX)
 endif()
 
 add_library(SnowboardKidsCpu STATIC
@@ -47,7 +60,8 @@ target_compile_options(SnowboardKidsCpu PRIVATE
 )
 
 target_include_directories(SnowboardKidsCpu PRIVATE
-    "${CMAKE_SOURCE_DIR}/RecompiledFuncs"
+    "${SBK_CPU_OUTPUT_DIR}"
+    "${CMAKE_SOURCE_DIR}/src"
     "${N64_RUNTIME_DIR}/N64Recomp/include"
 )
 
@@ -344,4 +358,20 @@ if(SBK_BUILD_QUIESCENCE_TESTS)
 endif()
 if(TARGET recompui)
     target_include_directories(recompui PRIVATE "${CMAKE_SOURCE_DIR}/src")
+endif()
+
+# Development A/B selection; production acceptance must explicitly select ON.
+if(SBK_CONTINUATIONS)
+    if(NOT TARGET SnowboardKidsRecompiled)
+        message(FATAL_ERROR "P4-A backend requires the real native-boot application target")
+    endif()
+    foreach(SBK_TARGET SnowboardKidsRecompiled librecomp ultramodern)
+        target_compile_definitions(${SBK_TARGET} PRIVATE SBK_CONTINUATIONS=1)
+        target_include_directories(${SBK_TARGET} PRIVATE
+            "${CMAKE_SOURCE_DIR}/src" "${N64_RUNTIME_DIR}/N64Recomp/include")
+    endforeach()
+    target_sources(SnowboardKidsRecompiled PRIVATE
+        src/continuation/dispatch.cpp src/continuation/execution.cpp
+        src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
+    target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
 endif()

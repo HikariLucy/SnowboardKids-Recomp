@@ -1,5 +1,9 @@
 #include "probe.hpp"
 #include "quiescence.hpp"
+#ifdef SBK_CONTINUATIONS
+#include "continuation/execution.hpp"
+#include "continuation/runtime_owner.hpp"
+#endif
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/renderer_context.hpp"
 #include <atomic>
@@ -181,6 +185,13 @@ void probe_poll() {
             logical_now() == frozen_time && audio_bytes() == frozen_audio;
         std::fprintf(stderr, "P2 AUDIT gen=%llu unchanged=%d audio_bytes=%u owners=%zu\n",
             (unsigned long long)operation, same, frozen_audio, current.owners);
+#ifdef SBK_CONTINUATIONS
+        std::fprintf(stderr, "P4A FROZEN_INVARIANT gen=%llu live_owners=%zu total_dispatches=%llu startup_retired=%d\n",
+            (unsigned long long)operation,
+            sbk::continuation::live_owner_count(),
+            (unsigned long long)sbk::continuation::total_dispatch_count(),
+            sbk::continuation::startup_is_retired() ? 1 : 0);
+#endif
         if (!same) {
             dump_trace();
             std::fprintf(stderr, "P2 FAILED: mutation while Frozen; cancelling probe\n");

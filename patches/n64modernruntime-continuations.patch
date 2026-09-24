@@ -1,0 +1,222 @@
+diff --git a/librecomp/src/recomp.cpp b/librecomp/src/recomp.cpp
+--- a/librecomp/src/recomp.cpp
++++ b/librecomp/src/recomp.cpp
+@@ -1,3 +1,6 @@
++#ifdef SBK_CONTINUATIONS
++#include "continuation/execution.hpp"
++#endif
+ #include "quiescence/quiescence.hpp"
+ #include <cstdio>
+ #include <cstdlib>
+@@ -478,7 +481,13 @@
+     auto find_it = game_roms.find(current_game.value());
+     const recomp::GameEntry& game_entry = find_it->second;
+     
++#ifdef SBK_CONTINUATIONS
++    auto* execution = sbk::continuation::current_execution();
++    if (!execution) throw std::runtime_error("Guest thread has no continuation owner");
++    auto& ctx = execution->cpu;
++#else
+     recomp_context ctx{};
++#endif
+     ctx.r29 = sp;
+     ctx.r4 = arg;
+     ctx.mips3_float_mode = 0;
+@@ -489,7 +498,12 @@
+     }
+ 
+     recomp_func_t* func = get_function(addr);
++#ifdef SBK_CONTINUATIONS
++    sbk::continuation::run_execution(rdram, *execution,
++        sbk::continuation::descriptor_for_token(func).id);
++#else
+     func(rdram, &ctx);
++#endif
+ }
+ 
+ void init(uint8_t* rdram, recomp_context* ctx, gpr entrypoint) {
+diff --git a/ultramodern/src/scheduling.cpp b/ultramodern/src/scheduling.cpp
+--- a/ultramodern/src/scheduling.cpp
++++ b/ultramodern/src/scheduling.cpp
+@@ -1,4 +1,7 @@
+ #include "quiescence/quiescence.hpp"
++#ifdef SBK_CONTINUATIONS
++#include "continuation/hle.hpp"
++#endif
+ #include "ultramodern/ultramodern.hpp"
+ 
+ void ultramodern::schedule_running_thread(RDRAM_ARG PTR(OSThread) t_) {
+@@ -17,6 +20,11 @@
+ }
+ 
+ void ultramodern::check_running_queue(RDRAM_ARG1) {
++#ifdef SBK_CONTINUATIONS
++    // HLE commits its result and unwinds before the dispatcher can park.
++    if (sbk::continuation::hle_active()) return;
++    if (!ultramodern::this_thread()) return;
++#endif
+     sbk::quiescence::game_safepoint();
+     // Check if there are any threads in the running queue.
+     if (!thread_queue_empty(PASS_RDRAM running_queue)) {
+diff --git a/ultramodern/src/threads.cpp b/ultramodern/src/threads.cpp
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -1,3 +1,6 @@
++#ifdef SBK_CONTINUATIONS
++#include "continuation/runtime_owner.hpp"
++#endif
+ #include "quiescence/quiescence.hpp"
+ #include <cstdio>
+ #include <thread>
+@@ -153,14 +156,22 @@
+     sbk::quiescence::owner_wake();
+     // If this thread's context was replaced by another thread or deleted, destroy it again from its own context.
+     // This will trigger thread cleanup instead.
++    #ifdef SBK_CONTINUATIONS
++    if (!sbk::continuation::owner_is_current()) {
++#else
+     if (TO_PTR(OSThread, ultramodern::this_thread())->context != thread_context) {
++#endif
+         osDestroyThread(PASS_RDRAM NULLPTR);
+     }
+ }
+ 
+ void resume_thread(OSThread* t) {
+     debug_printf("[Thread] Resuming execution of thread %d\n", t->id);
++#ifdef SBK_CONTINUATIONS
++    sbk::continuation::context_for(t)->running.signal();
++#else
+     t->context->running.signal();
++#endif
+ }
+ 
+ void run_next_thread(RDRAM_ARG1) {
+@@ -170,25 +181,41 @@
+ 
+     OSThread* to_run = TO_PTR(OSThread, ultramodern::thread_queue_pop(PASS_RDRAM ultramodern::running_queue));
+     debug_printf("[Scheduling] Resuming execution of thread %d\n", to_run->id);
++#ifdef SBK_CONTINUATIONS
++    sbk::continuation::context_for(to_run)->running.signal();
++#else
+     to_run->context->running.signal();
++#endif
+ }
+ 
+ void ultramodern::run_next_thread_and_wait(RDRAM_ARG1) {
++#ifdef SBK_CONTINUATIONS
++    UltraThreadContext* cur_context = sbk::continuation::current_context();
++#else
+     UltraThreadContext* cur_context = TO_PTR(OSThread, thread_self)->context;
++#endif
+     run_next_thread(PASS_RDRAM1);
+     wait_for_resumed(PASS_RDRAM cur_context);
+ }
+ 
+ void ultramodern::resume_thread_and_wait(RDRAM_ARG OSThread *t) {
++#ifdef SBK_CONTINUATIONS
++    UltraThreadContext* cur_context = sbk::continuation::current_context();
++#else
+     UltraThreadContext* cur_context = TO_PTR(OSThread, thread_self)->context;
++#endif
+     resume_thread(t);
+     wait_for_resumed(PASS_RDRAM cur_context);
+ }
+ 
+ static void _thread_func(RDRAM_ARG PTR(OSThread) self_, PTR(thread_func_t) entrypoint, PTR(void) arg, UltraThreadContext* thread_context) {
++#ifdef SBK_CONTINUATIONS
++    sbk::continuation::bind_worker(thread_context);
++#endif
+     sbk::quiescence::Owner execution_owner{static_cast<uint32_t>(self_)};
+     OSThread *self = TO_PTR(OSThread, self_);
+-    debug_printf("[Thread] Thread created: %d\n", self->id);
++    const auto self_id = self->id;
++    debug_printf("[Thread] Thread created: %d\n", self_id);
+     thread_self = self_;
+     is_game_thread = true;
+ 
+@@ -199,7 +226,7 @@
+     // Signal the initialized semaphore to indicate that this thread can be started.
+     thread_context->initialized.signal();
+ 
+-    debug_printf("[Thread] Thread waiting to be started: %d\n", self->id);
++    debug_printf("[Thread] Thread waiting to be started: %d\n", self_id);
+ 
+     // Wait until the thread is marked as running.
+     try {
+@@ -208,8 +235,12 @@
+     }
+ 
+     // Make sure the thread wasn't replaced or destroyed before it was started.
++#ifdef SBK_CONTINUATIONS
++    if (sbk::continuation::owner_is_current()) {
++#else
+     if (self->context == thread_context) {
+-        debug_printf("[Thread] Thread started: %d\n", self->id);
++#endif
++        debug_printf("[Thread] Thread started: %d\n", self_id);
+         try {
+             // Run the thread's function with the provided argument.
+             run_thread_function(PASS_RDRAM entrypoint, self->sp, arg);
+@@ -217,13 +248,17 @@
+         }
+     }
+     else {
+-        debug_printf("[Thread] Thread destroyed before being started: %d\n", self->id);
++        debug_printf("[Thread] Thread destroyed before being started: %d\n", self_id);
+     }
+ 
+     // Check if the thread hasn't been destroyed or replaced. If so, then the thread terminated or destroyed itself,
+     // so mark this thread as destroyed and run the next queued thread.
++#ifdef SBK_CONTINUATIONS
++    if (sbk::continuation::finish_current_owner()) {
++#else
+     if (self->context == thread_context) {
+         self->context = nullptr;
++#endif
+         run_next_thread(PASS_RDRAM1);
+     }
+ 
+@@ -261,9 +296,13 @@
+ 
+     // Spawn a new thread, which will immediately pause itself and wait until it's been started.
+     // Pass the context as an argument to the thread function to ensure that it can't get cleared before the thread captures its value.
++#ifdef SBK_CONTINUATIONS
++    UltraThreadContext* context = sbk::continuation::create_owner(static_cast<uint32_t>(t_), t);
++#else
+     UltraThreadContext* context = new UltraThreadContext{};
+     t->context = context;
+-    context->host_thread = std::thread{_thread_func, PASS_RDRAM t_, entrypoint, arg, t->context};
++#endif
++    context->host_thread = std::thread{_thread_func, PASS_RDRAM t_, entrypoint, arg, context};
+ 
+     // Wait until the thread is initialized to indicate that it's ready to be started.
+     context->initialized.wait();
+@@ -314,10 +353,16 @@
+         ultramodern::thread_queue_remove(PASS_RDRAM t->queue, t_);
+     }
+     // Check if the thread has already been destroyed to prevent destroying it again.
++#ifdef SBK_CONTINUATIONS
++    UltraThreadContext* cur_context = sbk::continuation::detach_owner(t);
++#else
+     UltraThreadContext* cur_context = t->context;
++#endif
+     if (cur_context != nullptr) {
+         // Mark the target thread as destroyed and resume it. When it starts it'll check this and terminate itself instead of resuming.
++#ifndef SBK_CONTINUATIONS
+         t->context = nullptr;
++#endif
+         cur_context->running.signal();
+     }
+ }
+@@ -370,7 +415,11 @@
+             debug_printf("[Cleanup] Deleting thread context %p\n", to_delete);
+ 
+             to_delete->host_thread.join();
++#ifdef SBK_CONTINUATIONS
++            sbk::continuation::release_joined_owner(to_delete);
++#else
+             delete to_delete;
++#endif
+         }
+     }
+ }
