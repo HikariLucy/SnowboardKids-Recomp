@@ -151,6 +151,37 @@ void coverage() {
     empty.scissorRect.merge(full);
     check(!empty.projectionCoversWidth(scene) && empty.projectionCoversWidth(full), "empty pair falls back to scissor union");
     check(!empty.projectionCoversWidth(RT64::FixedRect()), "empty projection never covers");
+
+    // Guest race_flow.c configures 2P as stacked full-width viewports and
+    // 3P/4P as quadrants. A framebuffer pair can contain every player and
+    // their HUD, so the drawn extent must be evaluated for each projection.
+    RT64::FramebufferPair two;
+    two.reset();
+    const auto upper = rect(16, 16, 304, 120);
+    const auto lower = rect(16, 120, 304, 224);
+    two.drawColorRect.merge(upper);
+    two.drawColorRect.merge(lower);
+    two.drawColorRect.merge(rect(120, 20, 200, 36)); // player HUD
+    check(two.projectionCoversWidth(upper) && two.projectionCoversWidth(lower),
+          "2P stacked scene projections cover their drawn width");
+    check(!two.projectionCoversWidth(rect(120, 20, 200, 36)),
+          "2P HUD projection does not claim the scene width");
+
+    for (int players : {3, 4}) {
+        RT64::FramebufferPair pair;
+        pair.reset();
+        const auto p1 = rect(16, 16, 160, 120);
+        const auto p2 = rect(16, 120, 160, 224);
+        const auto p3 = rect(160, 16, 304, 120);
+        pair.drawColorRect.merge(p1);
+        pair.drawColorRect.merge(p2);
+        pair.drawColorRect.merge(p3);
+        if (players == 4) pair.drawColorRect.merge(rect(160, 120, 304, 224));
+        check(!pair.projectionCoversWidth(p1) && !pair.projectionCoversWidth(p2) &&
+              !pair.projectionCoversWidth(p3),
+              players == 3 ? "3P quadrants stay separate in Expand" :
+                             "4P quadrants stay separate in Expand");
+    }
 }
 
 void presentation() {
