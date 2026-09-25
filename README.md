@@ -78,6 +78,8 @@ The decompilation project is a research reference and is **not** itself a PC por
 - [Current status](docs/STATUS.md)
 - [Roadmap](docs/ROADMAP.md)
 - [M1 feasibility](docs/M1-FEASIBILITY.md)
+- [Controller Pak persistence and original save location](docs/CONTROLLER-PAK-PERSISTENCE.md)
+- [Original save data map](docs/SAVE-DATA-MAP.md)
 
 ## Disclaimer
 
