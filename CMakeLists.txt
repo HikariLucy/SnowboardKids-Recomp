@@ -1,11 +1,44 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(SnowboardKidsRecompiled LANGUAGES C CXX)
+project(SnowboardKidsRecompiled VERSION 0.1.0 LANGUAGES C CXX)
+
+execute_process(COMMAND git rev-parse --short=12 HEAD
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    OUTPUT_VARIABLE SBK_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+if(NOT SBK_COMMIT)
+    set(SBK_COMMIT "unknown")
+endif()
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
+    )
+endif()
+
+option(SBK_ROM_FREE_CI "Configure only ROM-free CI targets" OFF)
+if(SBK_ROM_FREE_CI)
+    enable_testing()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
+    target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
+    add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+    add_test(NAME controller_pak
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
+    add_test(NAME release_artifact_audit
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_artifact_audit.py")
+    add_test(NAME release_package
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_package.py")
+    add_test(NAME release_bootstrap
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_bootstrap.py")
+    return()
+endif()
 
 set(N64_RUNTIME_DIR "${CMAKE_SOURCE_DIR}/.deps-runtime/N64ModernRuntime")
 
@@ -281,6 +314,8 @@ if(SBK_BUILD_NATIVE_BOOT)
         -fms-extensions
         -fno-omit-frame-pointer
     )
+    target_compile_definitions(SnowboardKidsRecompiled PRIVATE
+        SBK_VERSION="${PROJECT_VERSION}" SBK_COMMIT="${SBK_COMMIT}")
 
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         target_link_options(SnowboardKidsRecompiled PRIVATE -rdynamic)
@@ -293,10 +328,12 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${N64_RUNTIME_DIR}/ultramodern/include"
         "${N64_RUNTIME_DIR}/thirdparty"
         "${RECOMP_FRONTEND_DIR}/recompui/include"
+        "${RECOMP_FRONTEND_DIR}/recompui/src"
         "${RECOMP_FRONTEND_DIR}/recompinput/include"
         "${SNOWBOARDKIDS_THEME_INCLUDE_DIR}"
         "${RT64_DIR}/src"
         "${RT64_DIR}/src/contrib"
+        "${RT64_DIR}/src/contrib/nativefiledialog-extended/src/include"
         "${CMAKE_BINARY_DIR}/shaders"
         ${SDL2_INCLUDE_DIRS}
     )

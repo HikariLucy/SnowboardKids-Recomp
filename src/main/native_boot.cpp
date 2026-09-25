@@ -31,6 +31,7 @@
 
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
+#include "nfd.h"
 
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
@@ -42,6 +43,7 @@
 #include "recompui/renderer.h"
 #include "recompui/program_config.h"
 #include "recompui/recompui.h"
+#include "util/file.h"
 #include "recomp_theme.h"
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
@@ -616,28 +618,66 @@ const char* validation_error_name(recomp::RomValidationError error) {
 } // namespace
 
 int main(int argc, char** argv) {
+    if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
+        std::printf("Snowboard Kids Recompiled %s\ncommit %s\n", SBK_VERSION, SBK_COMMIT);
+        return EXIT_SUCCESS;
+    }
+    if (argc == 2 && std::strcmp(argv[1], "--help") == 0) {
+        std::puts("Usage: SnowboardKidsRecompiled [path-to-your-USA-ROM]\n"
+                  "Without a path, select your own ROM in the file dialog.\n"
+                  "Options: --help, --version");
+        return EXIT_SUCCESS;
+    }
+    if (argc > 2 || (argc == 2 && argv[1][0] == '-')) {
+        std::fprintf(stderr, "Invalid arguments. Use --help for usage.\n");
+        return 2;
+    }
+
     sbk::quiescence::probe_init(
         [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); },
         []() -> uint32_t { return audio_device ? SDL_GetQueuedAudioSize(audio_device) : 0; });
     install_crash_handlers();
-    if (argc != 2) {
-        std::fprintf(stderr, "usage: SnowboardKidsRecompiled <snowboardkids.z64>\n");
+    std::filesystem::path rom_path;
+    if (argc == 2) rom_path = std::filesystem::absolute(argv[1]);
+
+    // RecompFrontend resolves its read-only assets against cwd on desktop.
+    // Anchor that lookup at the executable, independent of the launch cwd.
+    char* base_path = SDL_GetBasePath();
+    if (!base_path) {
+        std::fprintf(stderr, "Cannot locate application assets: %s\n", SDL_GetError());
+        return EXIT_FAILURE;
+    }
+    const std::filesystem::path install_dir = base_path;
+    SDL_free(base_path);
+    std::error_code ec;
+    std::filesystem::current_path(install_dir, ec);
+    if (ec) {
+        std::fprintf(stderr, "Cannot open application directory: %s\n", ec.message().c_str());
         return EXIT_FAILURE;
     }
 
-    const std::filesystem::path rom_path = argv[1];
-    const std::filesystem::path runtime_dir =
-        std::filesystem::current_path() / "runtime-data";
+    recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
+    recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
+    std::filesystem::path runtime_dir;
+    if (const char* override_path = std::getenv("SBK_USER_DATA_DIR")) {
+        runtime_dir = override_path;
+    } else if (std::filesystem::exists(install_dir / "CMakeCache.txt") &&
+               std::filesystem::exists(install_dir / "runtime-data")) {
+        runtime_dir = install_dir / "runtime-data"; // existing developer layout
+    } else {
+        runtime_dir = recompui::file::get_app_folder_path();
+    }
+    if (runtime_dir.empty()) {
+        std::fprintf(stderr, "Cannot determine a writable user data directory. Set SBK_USER_DATA_DIR.\n");
+        return EXIT_FAILURE;
+    }
 
-    std::error_code ec;
     std::filesystem::create_directories(runtime_dir, ec);
     if (ec) {
         std::fprintf(stderr, "Failed to create runtime data directory: %s\n", ec.message().c_str());
         return EXIT_FAILURE;
     }
 
-    recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
-    recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
     recomp::register_config_path(runtime_dir);
     sbk::pfs::configure(recomp::get_config_path());
     for (int port = 0; port < 4; ++port)
@@ -685,11 +725,28 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    if (rom_path.empty()) {
+        if (NFD_Init() != NFD_OKAY) {
+            std::fprintf(stderr, "Cannot open ROM selector: %s\n", NFD_GetError());
+            return EXIT_FAILURE;
+        }
+        bool selected = false;
+        recompui::file::open_file_dialog([&](bool success, const std::filesystem::path& path) {
+            selected = success;
+            if (success) rom_path = path;
+        });
+        NFD_Quit();
+        if (!selected) {
+            std::puts("ROM selection cancelled.");
+            return EXIT_SUCCESS;
+        }
+    }
     std::u8string game_id = game.game_id;
     const auto validation = recomp::select_rom(rom_path, game_id);
     std::printf("ROM validation: %s\n", validation_error_name(validation));
 
     if (validation != recomp::RomValidationError::Good) {
+        std::fprintf(stderr, "The selected file is not the supported Snowboard Kids (USA) ROM.\n");
         return EXIT_FAILURE;
     }
 
