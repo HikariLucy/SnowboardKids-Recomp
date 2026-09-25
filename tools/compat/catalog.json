@@ -1,0 +1,31 @@
+{
+  "source": "snowboardkids-decomp@03088d8c5164644c7697846770b091d5265e53de",
+  "courses": {
+    "0": "Big Snowman",
+    "1": "Sunset Rock",
+    "2": "Night Highway",
+    "3": "Grass Valley",
+    "4": "Dizzy Land",
+    "5": "Quicksand Valley",
+    "6": "Silver Mountain",
+    "7": "Animal Land",
+    "8": "Ninja Land",
+    "9": "Rookie Mountain"
+  },
+  "characters": {
+    "0": "Slash",
+    "1": "Nancy",
+    "2": "Jam",
+    "3": "Linda",
+    "4": "Tommy",
+    "5": "Shinobin"
+  },
+  "items": {
+    "1": "Slapstick",
+    "2": "Parachute",
+    "3": "Freeze Shot",
+    "4": "Snowman",
+    "5": "Bomb"
+  },
+  "overlays": null
+}
