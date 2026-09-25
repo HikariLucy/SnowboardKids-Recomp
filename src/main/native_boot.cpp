@@ -32,6 +32,7 @@
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
 #include "nfd.h"
+#include "sbk_version.h"
 
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"

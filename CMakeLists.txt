@@ -2,13 +2,16 @@ cmake_minimum_required(VERSION 3.20)
 
 project(SnowboardKidsRecompiled VERSION 0.1.0 LANGUAGES C CXX)
 
-execute_process(COMMAND git rev-parse --short=12 HEAD
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_custom_target(sbk_version_header ALL
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/generate_version_header.py"
+        --out "${CMAKE_BINARY_DIR}/generated/sbk_version.h"
+        --version "${PROJECT_VERSION}"
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    OUTPUT_VARIABLE SBK_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE
-    ERROR_QUIET)
-if(NOT SBK_COMMIT)
-    set(SBK_COMMIT "unknown")
-endif()
+    COMMENT "Generating dynamic version header"
+)
+include_directories("${CMAKE_BINARY_DIR}/generated")
 
 set(CMAKE_C_STANDARD 17)
 set(CMAKE_CXX_STANDARD 20)
@@ -25,7 +28,6 @@ endif()
 option(SBK_ROM_FREE_CI "Configure only ROM-free CI targets" OFF)
 if(SBK_ROM_FREE_CI)
     enable_testing()
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
@@ -37,6 +39,8 @@ if(SBK_ROM_FREE_CI)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_package.py")
     add_test(NAME release_bootstrap
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_bootstrap.py")
+    add_test(NAME release_version
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_version.py")
     return()
 endif()
 
@@ -309,13 +313,19 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_test(NAME controller_pak
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
 
-    target_compile_options(SnowboardKidsRecompiled PRIVATE
-        -fno-strict-aliasing
-        -fms-extensions
-        -fno-omit-frame-pointer
-    )
-    target_compile_definitions(SnowboardKidsRecompiled PRIVATE
-        SBK_VERSION="${PROJECT_VERSION}" SBK_COMMIT="${SBK_COMMIT}")
+    add_dependencies(SnowboardKidsRecompiled sbk_version_header)
+
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(SnowboardKidsRecompiled PRIVATE
+            -fno-strict-aliasing
+            -fms-extensions
+            -fno-omit-frame-pointer
+        )
+    elseif(MSVC)
+        target_compile_options(SnowboardKidsRecompiled PRIVATE
+            /permissive-
+        )
+    endif()
 
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         target_link_options(SnowboardKidsRecompiled PRIVATE -rdynamic)
@@ -323,6 +333,7 @@ if(SBK_BUILD_NATIVE_BOOT)
 
     target_include_directories(SnowboardKidsRecompiled PRIVATE
         "${CMAKE_SOURCE_DIR}"
+        "${CMAKE_BINARY_DIR}/generated"
         "${N64_RUNTIME_DIR}/librecomp/include"
         "${N64_RUNTIME_DIR}/N64Recomp/include"
         "${N64_RUNTIME_DIR}/ultramodern/include"
@@ -355,8 +366,10 @@ if(SBK_BUILD_NATIVE_BOOT)
         SDL2::SDL2
         Threads::Threads
         ${CMAKE_DL_LIBS}
-        atomic
     )
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+        target_link_libraries(SnowboardKidsRecompiled PRIVATE atomic)
+    endif()
 
     # RecompFrontend resolves Linux assets relative to the process working
     # directory. Package the shared Snowboard Kids theme assets next to the
