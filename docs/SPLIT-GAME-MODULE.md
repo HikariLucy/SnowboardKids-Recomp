@@ -216,16 +216,32 @@ When a savestate is loaded in a fresh process:
 ```
 
 #### Model D User Journey
+
+##### Option A: Interactive First-Run (Zero Terminal Setup)
 ```
-1. Download prebuilt SnowboardKidsEngine (e.g., AppImage, zip, or deb)
-2. Run generator script with user's legally dumped USA ROM:
-   python3 scripts/build-game-module.py snowboardkids.z64
-   --> Validates ROM SHA-1 (1583bacc...)
-   --> Compiles 43 game source files in ~17 seconds
-   --> Places SnowboardKidsGame.so into modules/
-3. Run ./SnowboardKidsEngine
-   --> Discovers and loads SnowboardKidsGame.so automatically
-   --> Seamless boot directly into Snowboard Kids!
+1. Download prebuilt SnowboardKidsEngine package
+2. Run ./SnowboardKidsEngine
+   --> Engine starts and checks <user-data>/modules/snowboardkids-us/
+   --> Module not found: Native file picker (NFD) prompts user for legal Snowboard Kids (USA) ROM
+   --> ROM validated (SHA-1: 1583bacc9046a360df8ea4d536942155247e154c)
+   --> Local Module Builder generates and compiles SnowboardKidsGame.so (~17s)
+   --> Atomic install into <user-data>/modules/snowboardkids-us/
+   --> Validates ABI and immediately boots the game!
+3. Subsequent runs:
+   --> Engine detects valid installed module and boots instantly without rebuilding.
+```
+
+##### Option B: Command-Line Builder Service
+```
+1. Run local builder CLI:
+   python3 scripts/build-game-module.py --rom /path/to/snowboardkids.z64
+   # Or directly through the engine binary:
+   ./SnowboardKidsEngine --build-module /path/to/snowboardkids.z64
+   --> Validates ROM format and SHA-1 checksum
+   --> Extracts RSP microcode and compiles 43 translation units
+   --> Emits non-proprietary MODULE-INFO.json manifest
+   --> Atomically installs SnowboardKidsGame.so to user data
+2. Launch ./SnowboardKidsEngine
 ```
 
 ### Measured Performance & Benchmark Data
@@ -266,4 +282,6 @@ When a savestate is loaded in a fresh process:
 | `P4-A Live Navigation` | Boot -> character select -> course select -> active race | `SnowboardKidsEngine` + `SnowboardKidsGame.so` | **PASS (100%)** |
 | `Savestate Persistence` | .sbks encode, decode, atomic save, CRC & XXH3 validation | Engine savestate service | **PASS (100%)** |
 | `Cross-Process Restore` | Process A saves .sbks -> Process B restores and resumes execution | Engine + Module continuation dispatch | **PASS (100%)** |
+| `module_builder_unit` | ROM formats, toolchain discovery, command generation, manifest | Builder service Python package | **PASS (100%)** |
+| `Fresh User First-Run Flow` | Clean user data -> build -> install -> boot -> second run reuse | Engine first-run state machine | **PASS (100%)** |
 

@@ -1,28 +1,49 @@
-# Running Snowboard Kids Recompiled
+# Running Snowboard Kids Recompiled (Model D Architecture)
 
-This archive never contains a ROM. Supply your own legally obtained
-**Snowboard Kids (USA)** ROM. Supported identity: game code `NSKE`, expected
-USA dump SHA-1 `1583bacc9046a360df8ea4d536942155247e154c`.
+This distribution contains the standalone, ROM-free game engine (`SnowboardKidsEngine`).
+It contains **no ROM data**, **no commercial game assets**, and **no precompiled game modules**.
 
-Extract the whole archive, then run `SnowboardKidsRecompiled` (or the Windows
-`.exe`). With no argument, select your ROM in the file dialog. You can also
-pass its absolute path. `--help` and `--version` work without a ROM or graphics.
-The app validates ROM contents and rejects the wrong game or revision.
+You supply your own legally dumped **Snowboard Kids (USA)** ROM image (`.z64`, `.v64`, `.n64`).
+Supported ROM SHA-1: `1583bacc9046a360df8ea4d536942155247e154c`.
 
-Configs, savestates and Controller Pak files live in the frontend user-data
-folder (`~/.config/snowboardkids-recompiled` on Linux; Local AppData on
-Windows). Set `SBK_USER_DATA_DIR` to an absolute path to override it. F5 saves
-a quick savestate and F8 loads it. Controller Pak `.mpk` data is independent of
-savestates and is not rewound by F8. The Controls page supports assignment and
-remapping; a keyboard can control player 1.
+---
 
-If Vulkan startup fails, install a Vulkan-capable driver. On Linux the host
-also needs SDL2, GTK3 and their runtime libraries; use `ldd` on the executable
-to identify a missing library. If audio cannot open, check the system audio
-device. For an invalid ROM, verify that it is the USA game and not a different
-region. If user data cannot be written, check permissions or set
-`SBK_USER_DATA_DIR` to a writable directory. A corrupt Controller Pak needs
-manual backup/repair; do not delete your `.mpk` without preserving a copy.
+## 1. First-Run & Local Module Generation
 
-This is a development candidate. Full gameplay and physical-controller gates
-remain pending; see the source repository compatibility documents.
+On first startup, the engine detects that no game module is installed:
+1. Run `./SnowboardKidsEngine`.
+2. A file selection dialog will prompt you to select your legal Snowboard Kids (USA) ROM. (Alternatively, pass the ROM directly on the command line: `./SnowboardKidsEngine /path/to/snowboardkids.z64`).
+3. The engine validates the ROM integrity and compiles the local dynamic game module (`SnowboardKidsGame.so` on Linux, `SnowboardKidsGame.dll` on Windows) into your user data directory (`~/.local/share/SnowboardKids/modules/snowboardkids-us/`).
+4. Once compiled and validated, the game starts automatically!
+
+### CLI / Offline Builder
+You can also generate the game module ahead of time:
+```bash
+python3 scripts/build-game-module.py /path/to/snowboardkids.z64
+# or:
+./SnowboardKidsEngine --build-module /path/to/snowboardkids.z64
+```
+
+### Subsequent Launches
+On subsequent launches, the engine detects the installed game module in user data and loads it immediately **without rebuilding**.
+
+---
+
+## 2. User Data, Savestates, and Controller Pak
+
+- **User Data Directory**: Configurations, controller profiles, game modules, and savestates are stored in:
+  - Linux: `~/.local/share/SnowboardKids` (or `$XDG_DATA_HOME/SnowboardKids`)
+  - Windows: `%APPDATA%\SnowboardKids`
+  - Override path by setting the `SBK_USER_DATA_DIR` environment variable.
+- **Savestates (`.sbks`)**: Press **F5** to quick-save, **F8** to quick-load. Savestate files store guest execution state, CPU registers, RAM, and continuation frames. Rebuilding the game module from the same ROM and compatible corpus preserves full savestate compatibility.
+- **Controller Pak (`.mpk`)**: Controller Pak persistence files live in `<user-data>/` and represent external physical memory cards. **Savestates do NOT serialize or rewind external Controller Pak media.** When an `.sbks` state is restored, the Controller Pak file on disk remains intact and is never rewound.
+
+---
+
+## 3. Host Requirements
+
+- **Graphics**: Vulkan 1.2+ capable GPU and drivers.
+- **Audio / Input**: SDL2 runtime libraries.
+- **Local Module Builder**:
+  - Python 3.8+
+  - C++20 compiler (`clang++` or `g++` on Linux; Visual Studio C++ / `clang-cl` on Windows).
