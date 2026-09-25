@@ -40,13 +40,12 @@ together with option 3.
 ## Decision and implementation
 
 Option 1, tied to the same authority librecomp uses. `src/main/config_tabs.hpp`
-registers the Mods tab only when the game has a `mod_game_id`, which is exactly
-when librecomp loads mods. In that case boot calls `update_game_mod_id()` before
-the tab exists. Snowboard Kids registers none, so the options menu has General,
-Graphics, Controls and Sound, and no ModMenu can be built.
-
-Enabling mods later (option 3) sets `mod_game_id` in `native_boot.cpp`. The tab
-and the frontend id then follow automatically.
+registers the Mods tab only when the game has a `mod_game_id` **and** the mod
+subsystem has been initialized. The current boot path passes `false` explicitly;
+it also registers no game mod ID. Thus the options menu has General, Graphics,
+Controls and Sound, and no ModMenu can be built. If mods are enabled in a later
+phase, initialization must complete before passing `true`; boot then calls
+`update_game_mod_id()` before creating the tab. Setting an ID alone is not enough.
 
 A file dropped on the window before the game starts still selects the `mods`
 tab id. With the tab absent this is a no-op (`TabbedModal::set_selected_tab`

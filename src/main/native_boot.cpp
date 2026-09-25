@@ -134,7 +134,7 @@ void apply_resolution_override() {
     }
 }
 
-void init_frontend_config(const recomp::GameEntry& game) {
+void init_frontend_config(const recomp::GameEntry& game, bool mods_initialized) {
     // Minimal standard RecompFrontend configuration for first boot.
     // Game-specific settings can be added after the native boot path works.
     recompui::config::GeneralTabOptions general_options{};
@@ -142,7 +142,7 @@ void init_frontend_config(const recomp::GameEntry& game) {
     general_options.has_gyro_sensitivity = false;
     general_options.has_mouse_sensitivity = false;
 
-    for (const auto tab : sbk::frontend::config_tabs(game.mod_game_id)) {
+    for (const auto tab : sbk::frontend::config_tabs(game.mod_game_id, mods_initialized)) {
         switch (tab) {
             case sbk::frontend::ConfigTab::General: recompui::config::create_general_tab(general_options); break;
             case sbk::frontend::ConfigTab::Graphics:
@@ -621,7 +621,7 @@ int main(int argc, char** argv) {
 
     snowboardkids::theme::apply();
     initialize_controls(runtime_dir);
-    init_frontend_config(game);
+    init_frontend_config(game, false); // Mod subsystem is not initialized for this game.
 
     if (!recomp::register_game(game)) {
         std::fprintf(stderr, "Failed to register Snowboard Kids\n");
