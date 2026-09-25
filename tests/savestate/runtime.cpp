@@ -415,6 +415,59 @@ int main(int argc, char** argv) {
         std::_Exit(0);
     }
 
+    // Multiplayer-like guest memory: player count, four RacePlayer records
+    // and SI pad latches. The host SDL controllers are deliberately absent.
+    // The matching USA map places RacePlayer at 0x80121D80 with 0x60C stride.
+    {
+        auto guest_byte = [](uint32_t address) -> uint8_t& {
+            return ram[(address - 0x80000000u) ^ 3u];
+        };
+        constexpr uint32_t player_count_addr = 0x80121B55u;
+        constexpr uint32_t players_addr = 0x80121D80u;
+        constexpr uint32_t pads_addr = 0x800E4C00u;
+        for (int cycle = 0; cycle < 100; ++cycle) {
+            const uint8_t players = cycle & 1 ? 4 : 2;
+            const uint64_t fixture_gen = freeze();
+            guest_byte(player_count_addr) = players;
+            for (uint32_t port = 0; port < 4; ++port) {
+                guest_byte(players_addr + port * 0x60Cu + 5u) = uint8_t(port + 1);
+                guest_byte(players_addr + port * 0x60Cu + 0x512u) = uint8_t(port + 1);
+                guest_byte(pads_addr + port * 6u) = uint8_t(0x10u << (port & 1));
+                guest_byte(pads_addr + port * 6u + 4u) = port < players ? 0 : 8;
+            }
+            s::InMemorySnapshot fixture;
+            CHECK(service.capture(fixture_gen, fixture).ok);
+            CHECK(fixture.input.host_latches == 0);
+            guest_byte(player_count_addr) = 1;
+            for (uint32_t port = 0; port < 4; ++port) {
+                guest_byte(players_addr + port * 0x60Cu + 5u) = 0;
+                guest_byte(players_addr + port * 0x60Cu + 0x512u) = 0;
+                guest_byte(pads_addr + port * 6u) = 0;
+                guest_byte(pads_addr + port * 6u + 4u) = 8;
+            }
+            const auto restored = service.restore(fixture_gen, fixture);
+            CHECK(restored.ok && restored.hashes == fixture.hashes);
+            CHECK(guest_byte(player_count_addr) == players);
+            for (uint32_t port = 0; port < 4; ++port) {
+                CHECK(guest_byte(players_addr + port * 0x60Cu + 5u) == port + 1);
+                CHECK(guest_byte(players_addr + port * 0x60Cu + 0x512u) == port + 1);
+                CHECK(guest_byte(pads_addr + port * 6u + 4u) == (port < players ? 0 : 8));
+            }
+            thaw(fixture_gen);
+            advance(1);
+        }
+        const uint64_t fixture_gen = freeze();
+        guest_byte(player_count_addr) = 0;
+        for (uint32_t port = 0; port < 4; ++port) {
+            guest_byte(players_addr + port * 0x60Cu + 5u) = 0;
+            guest_byte(players_addr + port * 0x60Cu + 0x512u) = 0;
+            guest_byte(pads_addr + port * 6u) = 0;
+            guest_byte(pads_addr + port * 6u + 4u) = 0;
+        }
+        thaw(fixture_gen);
+        std::puts("multiplayer-like guest state: 50x 2P + 50x 4P capture/mutate/restore (no host controllers)");
+    }
+
     // ---- A/C/D: capture integrity, canonical equality, no host addresses ----
     uint64_t gen = freeze();
     const auto before = std::vector<uint8_t>(ram, ram + kExtent);

@@ -5,9 +5,12 @@
 extern "C" void osContGetReadData(OSContPad* pads);
 namespace ultramodern { void send_si_message() {} }
 
+static bool port2_connected = false;
+static uint16_t port0_button = 0x1000;
+
 static bool input(int port, uint16_t* buttons, float* x, float* y) {
-    if (port == 2) return false;
-    *buttons = port == 0 ? 0x1000 : 0;
+    if (port == 2 && !port2_connected) return false;
+    *buttons = port == 0 ? port0_button : (port == 2 ? 0x8000 : 0);
     *x = 0;
     *y = 0;
     return true;
@@ -30,4 +33,15 @@ int main() {
     assert(pads[2].button == 0 && pads[2].stick_x == 0 &&
            pads[2].stick_y == 0 && pads[2].err_no == 8);
     assert(pads[3].button == 0 && pads[3].err_no == 0);
+    for (int cycle = 0; cycle < 100; ++cycle) {
+        port2_connected = (cycle & 1) != 0;
+        port0_button = (cycle & 1) != 0 ? 0x1000 : 0;
+        osContGetReadData(pads);
+        assert(pads[0].button == port0_button && pads[0].err_no == 0);
+        assert(pads[1].button == 0 && pads[1].err_no == 0);
+        assert(pads[2].button == (port2_connected ? 0x8000 : 0) &&
+               pads[2].stick_x == 0 && pads[2].stick_y == 0 &&
+               pads[2].err_no == (port2_connected ? 0 : 8));
+        assert(pads[3].button == 0 && pads[3].err_no == 0);
+    }
 }
