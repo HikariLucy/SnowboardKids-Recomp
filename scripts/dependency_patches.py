@@ -12,28 +12,10 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-SERIES = {
-    'runtime': ('.deps-runtime/N64ModernRuntime',
-                '6ccb2e7c2e7f6708257b461097e0aaf03c445e2a', (
-                    'n64modernruntime-osstopthread.patch',
-                    'n64modernruntime-quiescence.patch',
-                    'n64modernruntime-continuations.patch',
-                    'n64modernruntime-savestate.patch',
-                    'n64modernruntime-shutdown.patch',
-                    'n64modernruntime-input-neutral.patch')),
-    'recomp': ('.deps/N64Recomp',
-               'ffb39cdad1da5de07eaaa48bd1db4a89a7986771', (
-                   'n64recomp-continuations.patch',)),
-    'rt64': ('.deps-renderer/rt64',
-             '6a4166b2cfa952d931a08481d1037da995f28b54', (
-                 'rt64-quiescence.patch',
-                 'rt64-aspect-coverage.patch')),
-    'frontend': ('.deps-renderer/RecompFrontend',
-                 'e85b912d9df677b04f9358867dd010c8af27ea05', (
-                     'recompfrontend-resolution.patch',
-                     'recompfrontend-quiescence.patch',
-                     'recompfrontend-input.patch')),
-}
+from dependency_lock import DEPENDENCIES
+
+SERIES = {name: (dep.path, dep.commit, dep.patches)
+          for name, dep in DEPENDENCIES.items() if dep.patches}
 
 
 def git(directory, *args):

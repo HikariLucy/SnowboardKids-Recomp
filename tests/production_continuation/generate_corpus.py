@@ -13,7 +13,10 @@ p=argparse.ArgumentParser();p.add_argument('--compile',action='store_true');args
 build=ROOT/'build-tools/production-continuation';build.mkdir(parents=True,exist_ok=True)
 out=build/'corpus';out.mkdir(exist_ok=True)
 # Keep every production option; only relocate paths for the temporary config.
-config=(ROOT/'us.toml').read_text().replace('"../snowboardkids-decomp/build/snowboardkids.elf"',json.dumps(str(ROOT.parent/'snowboardkids-decomp/build/snowboardkids.elf'))).replace('"RecompiledFuncs"',json.dumps(str(out)))
+elf=Path(os.environ.get('SBK_ELF', str(ROOT.parent/'snowboardkids-decomp/build/snowboardkids.elf'))).resolve()
+if not elf.is_file():
+    raise SystemExit(f'Missing matching ELF: {elf}. Set SBK_ELF to your local matching USA ELF.')
+config=(ROOT/'us.toml').read_text().replace('"../snowboardkids-decomp/build/snowboardkids.elf"',json.dumps(str(elf))).replace('"RecompiledFuncs"',json.dumps(str(out)))
 config_path=build/'corpus.toml';config_path.write_text(config)
 log=build/'generation.log'
 with log.open('w') as stream:
