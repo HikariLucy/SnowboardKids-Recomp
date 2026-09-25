@@ -19,9 +19,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    get_filename_component(RECOMP_PROJ_PARENT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
     add_compile_options(
         "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
         "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
+        "-ffile-prefix-map=${RECOMP_PROJ_PARENT}=."
     )
 endif()
 
@@ -48,6 +50,8 @@ if(SBK_ROM_FREE_CI)
     endif()
     add_test(NAME module_loader_synthetic
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
+    add_test(NAME module_builder_unit
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
 
     add_test(NAME controller_pak
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
@@ -363,6 +367,8 @@ if(SBK_BUILD_NATIVE_BOOT)
     endif()
     add_test(NAME module_loader_synthetic
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
+    add_test(NAME module_builder_unit
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
 
     add_dependencies(SnowboardKidsRecompiled sbk_version_header)
     add_dependencies(SnowboardKidsEngine sbk_version_header)

@@ -51,10 +51,29 @@ def main():
         f"Architecture: {args.architecture}\n"
         f"Dependency-Lock-Digest: {lock_digest}\n"
     ).encode('utf-8')
+    binary_bytes = args.binary.read_bytes()
+    import shutil
+    import subprocess
+    import tempfile
+    if sys.platform.startswith('linux') and shutil.which('strip'):
+        with tempfile.NamedTemporaryFile() as tmp_bin:
+            res = subprocess.run(['strip', '--strip-all', '-o', tmp_bin.name, str(args.binary)], capture_output=True)
+            if res.returncode == 0 and Path(tmp_bin.name).stat().st_size > 0:
+                binary_bytes = Path(tmp_bin.name).read_bytes()
+
     files = [('BUILD-INFO.txt', manifest, False),
              ('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
              ('THIRD_PARTY_NOTICES.md', notices, False),
-             (args.binary.name, args.binary.read_bytes(), True)]
+             (args.binary.name, binary_bytes, True)]
+
+    # Bundle offline module builder tooling for user-ROM local compilation
+    builder_script = ROOT / 'scripts' / 'build-game-module.py'
+    if builder_script.is_file():
+        files.append(('scripts/build-game-module.py', builder_script.read_bytes(), True))
+    module_builder_dir = ROOT / 'scripts' / 'module_builder'
+    if module_builder_dir.is_dir():
+        for py_file in sorted(module_builder_dir.glob('*.py')):
+            files.append((f'scripts/module_builder/{py_file.name}', py_file.read_bytes(), False))
     for path in sorted(args.assets.rglob('*')):
         if path.is_symlink():
             parser.error(f'asset symlink refused: {path}')

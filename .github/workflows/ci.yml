@@ -1,7 +1,7 @@
 name: ROM-free CI
 on:
   push:
-    branches: [feat/release-distribution]
+    branches: [feat/release-distribution, feat/split-game-module]
   pull_request:
   workflow_dispatch:
 jobs:

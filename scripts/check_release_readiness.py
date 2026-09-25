@@ -86,7 +86,7 @@ def run_checks(root=ROOT):
         blockers.append(("theme_asset_icons", "theme UI navigation icons lack documented author redistribution grant"))
 
     # 7. Game-derived recompiled material / distribution model
-    blockers.append(("game_distribution_model", "recompiled CPU corpus and RSP microcode derived from proprietary ROM require local user-ROM distribution model"))
+    blockers.append(("game_distribution_model", "MODEL_D_TECHNICALLY_IMPLEMENTED: local user-ROM module builder implemented; release clearance pending distribution policy and legal clearance"))
 
     return passes, blockers
 
