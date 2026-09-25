@@ -263,6 +263,8 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
@@ -270,6 +272,9 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME controller_pak
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
 
     target_compile_options(SnowboardKidsRecompiled PRIVATE
         -fno-strict-aliasing

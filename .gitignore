@@ -11,6 +11,7 @@ snowboardkids.z64
 assets/extracted/
 asset-backups/
 build/
+build-pfs/
 out/
 dist/
 
@@ -33,6 +34,10 @@ logs/
 # Savestates (generated) and interrupted-save temporaries
 *.sbks
 .*.sbks.tmp-*
+*.mpk
+*.pak
+*.mpk.tmp-*
+runtime-data/
 
 # Recompiler toolchain / generated native code
 .deps/

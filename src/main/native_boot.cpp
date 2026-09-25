@@ -2,6 +2,7 @@
 #include "virtual_pad.hpp"
 #include "input_ports.hpp"
 #include "audio_progress.hpp"
+#include "pfs/hle.hpp"
 #include "quiescence/probe.hpp"
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
@@ -91,6 +92,15 @@ static void publish_controller_ports() {
         }
     }
     connected_port_mask.store(mask, std::memory_order_release);
+    static uint8_t previous_pfs_mask = 0xff;
+    if (mask != previous_pfs_mask) {
+        const bool absent_p1 = std::getenv("SBK_PFS_ABSENT") &&
+            std::strcmp(std::getenv("SBK_PFS_ABSENT"), "1") == 0;
+        for (int port = 0; port < 4; ++port)
+            sbk::pfs::set_port_present(port, (mask & (1u << port)) &&
+                !(port == 0 && absent_p1));
+        previous_pfs_mask = mask;
+    }
 }
 
 std::vector<recomp::GameEntry> supported_games = {
@@ -629,6 +639,11 @@ int main(int argc, char** argv) {
     recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
     recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
     recomp::register_config_path(runtime_dir);
+    sbk::pfs::configure(recomp::get_config_path());
+    for (int port = 0; port < 4; ++port)
+        sbk::pfs::set_port_present(port, port == 0 &&
+            !(std::getenv("SBK_PFS_ABSENT") &&
+              std::strcmp(std::getenv("SBK_PFS_ABSENT"), "1") == 0));
     const recomp::GameEntry& game = supported_games[0];
 
 #ifdef SBK_CONTINUATIONS
