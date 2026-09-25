@@ -9,6 +9,7 @@ uses initMultiplayerCourseSelectMenu even for one player, then initRaceSceneFlow
 Input timing uses guest controller reads, never wall-clock navigation sleeps.
 """
 import fcntl
+import argparse
 import os
 from pathlib import Path
 import re
@@ -56,6 +57,10 @@ def cleanup(process):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--through', choices=('character_select', 'race_active'),
+                        default='race_active')
+    args = parser.parse_args()
     build = ROOT / 'build-renderer-stack'
     executable = (build / 'SnowboardKidsRecompiled').resolve()
     with open('/tmp/sbk-p4a-live-navigation.lock', 'w') as lock:
@@ -67,10 +72,11 @@ def main():
         if instances(executable):
             print('FAIL: SnowboardKidsRecompiled already running; no instance launched')
             return 1
-        return run(build, executable)
+        return run(build, executable, args.through)
 
 
-def run(build, executable):
+def run(build, executable, through):
+    stages = STAGES[:STAGES.index(through) + 1]
     seen = []
     backend = boot = demo = False
     errors = []
@@ -102,11 +108,11 @@ def run(build, executable):
                 while not done:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0 or not selector.select(remaining):
-                        errors.append(f'timeout waiting for {STAGES[len(seen)]}')
+                        errors.append(f'timeout waiting for {stages[len(seen)]}')
                         break
                     chunk = os.read(process.stdout.fileno(), 65536)
                     if not chunk:
-                        errors.append('process exited before interactive race')
+                        errors.append(f'output closed before interactive race (returncode={process.poll()})')
                         break
                     log.write(chunk.decode(errors='replace'))
                     pending += chunk
@@ -126,13 +132,13 @@ def run(build, executable):
                                 demo = True
                                 if 'menu_navigation' in seen:
                                     errors.append('returned to demo after main menu')
-                            elif stage in STAGES and stage not in seen:
-                                if stage != STAGES[len(seen)] or not boot:
+                            elif stage in stages and stage not in seen:
+                                if stage != stages[len(seen)] or not boot:
                                     errors.append(f'out-of-order milestone: {stage}')
                                 else:
                                     seen.append(stage)
                                     print(f'{stage}: {time.monotonic() - started:.3f}s', flush=True)
-                                    if len(seen) < len(STAGES):
+                                    if len(seen) < len(stages):
                                         deadline = time.monotonic() + STAGE_TIMEOUTS[len(seen)]
                             # demo_race_players is diagnostic only, never a gate.
                         tick = re.search(r'P4A input_frame=(\d+)', line)
@@ -142,7 +148,7 @@ def run(build, executable):
                                 buttons(0x1000)
                             elif phase == 2:
                                 buttons(0)
-                        if errors or 'race_active' in seen:
+                        if errors or through in seen:
                             done = True
                             break
             finally:
@@ -156,14 +162,14 @@ def run(build, executable):
         errors.append(f'residual processes: {residual}')
     print('P4-A LIVE NAVIGATION')
     print(f'boot: {"PASS" if boot else "FAIL"}')
-    for stage in STAGES:
+    for stage in stages:
         print(f'{stage}: {"PASS" if stage in seen else "FAIL"}')
     print(f'title_demo_entered: {"YES (initial demo permitted)" if demo else "NO"}')
     print(f'continuation_backend: {"ON" if backend else "OFF"}')
     # The production dispatcher rejects native reentry; there is no fallback path.
     print(f'native_suspendable_fallbacks: {fallbacks if backend and boot else "UNKNOWN"}')
     print(f'residual_processes: {len(residual)}')
-    passed = boot and backend and seen == list(STAGES) and not errors
+    passed = boot and backend and seen == list(stages) and not errors
     if not passed:
         print(f'FAIL: {"; ".join(errors) or "missing milestones"}; log={log_path}')
     return 0 if passed else 1
