@@ -5,8 +5,10 @@
 #include "savestate/host_audio.hpp"
 #include "savestate/sbks.hpp"
 #include "savestate/storage.hpp"
+#include "pfs/controller_pak.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -208,6 +210,29 @@ int main(int argc, char** argv) {
     fs::create_directories(dir);
     const auto snap = make_snapshot(1);
     const auto file = encode(snap);
+
+    // External original-save media survives a real .sbks encode/decode.
+    {
+        sbk::pfs::ControllerPak pak(dir);
+        sbk::pfs::Identity save_id;
+        save_id.company_code = 0x4542;
+        save_id.game_code = 0x4e534b45;
+        int file_no = -1;
+        CHECK(pak.init(0) == sbk::pfs::Ok);
+        CHECK(pak.allocate(0, save_id, 256, file_no) == sbk::pfs::Ok);
+        std::array<uint8_t, 256> payload_a{}, payload_b{}, observed{};
+        payload_a.fill(0x41);
+        payload_b.fill(0x42);
+        CHECK(pak.write(0, file_no, 0, payload_a) == sbk::pfs::Ok);
+        const auto captured_sbks = encode(snap);
+        CHECK(pak.write(0, file_no, 0, payload_b) == sbk::pfs::Ok);
+        s::InMemorySnapshot restored_guest;
+        CHECK(sb::decode(captured_sbks, identity(), restored_guest).ok());
+        CHECK(same_snapshot(snap, restored_guest));
+        CHECK(pak.read(0, file_no, 0, observed) == sbk::pfs::Ok);
+        CHECK(observed == payload_b);
+        std::puts("PASS .sbks decode leaves external Controller Pak payload B intact");
+    }
 
     // 1. roundtrip, metadata
     {

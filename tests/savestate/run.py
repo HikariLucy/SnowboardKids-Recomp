@@ -53,7 +53,8 @@ with tempfile.TemporaryDirectory(prefix='sbk-savestate-') as directory:
     directory = Path(directory)
     persistence = directory / 'savestate_persistence'
     runtime = directory / 'savestate_runtime'
-    subprocess.run(flags + [str(ROOT / 'tests/savestate/persistence.cpp')] + [str(s) for s in savestate] +
+    subprocess.run(flags + [str(ROOT / 'tests/savestate/persistence.cpp'),
+                            str(ROOT / 'src/pfs/controller_pak.cpp')] + [str(s) for s in savestate] +
                    ['-o', str(persistence)], check=True, timeout=300)
     subprocess.run(flags + [str(s) for s in runtime_sources] + ['-o', str(runtime)], check=True, timeout=300)
     app_only = flags + ['-I' + str(RUNTIME / 'librecomp/include/librecomp'), '-fsyntax-only']
