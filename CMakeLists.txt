@@ -31,6 +31,24 @@ if(SBK_ROM_FREE_CI)
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+
+    add_library(SnowboardKidsSyntheticModule SHARED
+        tests/module/synthetic_module.cpp
+    )
+    target_include_directories(SnowboardKidsSyntheticModule PRIVATE src)
+
+    add_executable(SnowboardKidsModuleLoaderTest
+        tests/module/test_module_loader.cpp
+        src/module/module_loader.cpp
+    )
+    target_include_directories(SnowboardKidsModuleLoaderTest PRIVATE src)
+    target_link_libraries(SnowboardKidsModuleLoaderTest PRIVATE ${CMAKE_DL_LIBS})
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+        target_link_options(SnowboardKidsModuleLoaderTest PRIVATE -rdynamic)
+    endif()
+    add_test(NAME module_loader_synthetic
+        COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
+
     add_test(NAME controller_pak
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
     add_test(NAME release_artifact_audit
@@ -304,8 +322,22 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
         "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
+        "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
+
+    add_executable(SnowboardKidsEngine
+        "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/virtual_pad.cpp"
+        "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
+        "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
+        "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
+        ${SNOWBOARDKIDS_THEME_SOURCES}
+    )
+    target_compile_definitions(SnowboardKidsEngine PRIVATE SBK_ROM_FREE_ENGINE=1)
 
     enable_testing()
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
@@ -315,10 +347,33 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_test(NAME controller_pak
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
 
+    add_library(SnowboardKidsSyntheticModule SHARED
+        tests/module/synthetic_module.cpp
+    )
+    target_include_directories(SnowboardKidsSyntheticModule PRIVATE src)
+
+    add_executable(SnowboardKidsModuleLoaderTest
+        tests/module/test_module_loader.cpp
+        src/module/module_loader.cpp
+    )
+    target_include_directories(SnowboardKidsModuleLoaderTest PRIVATE src)
+    target_link_libraries(SnowboardKidsModuleLoaderTest PRIVATE ${CMAKE_DL_LIBS})
+    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+        target_link_options(SnowboardKidsModuleLoaderTest PRIVATE -rdynamic)
+    endif()
+    add_test(NAME module_loader_synthetic
+        COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
+
     add_dependencies(SnowboardKidsRecompiled sbk_version_header)
+    add_dependencies(SnowboardKidsEngine sbk_version_header)
 
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(SnowboardKidsRecompiled PRIVATE
+            -fno-strict-aliasing
+            -fms-extensions
+            -fno-omit-frame-pointer
+        )
+        target_compile_options(SnowboardKidsEngine PRIVATE
             -fno-strict-aliasing
             -fms-extensions
             -fno-omit-frame-pointer
@@ -327,37 +382,39 @@ if(SBK_BUILD_NATIVE_BOOT)
         target_compile_options(SnowboardKidsRecompiled PRIVATE
             /permissive-
         )
+        target_compile_options(SnowboardKidsEngine PRIVATE
+            /permissive-
+        )
     endif()
 
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         target_link_options(SnowboardKidsRecompiled PRIVATE -rdynamic)
+        target_link_options(SnowboardKidsEngine PRIVATE -rdynamic)
     endif()
 
-    target_include_directories(SnowboardKidsRecompiled PRIVATE
-        "${CMAKE_SOURCE_DIR}"
-        "${CMAKE_BINARY_DIR}/generated"
-        "${N64_RUNTIME_DIR}/librecomp/include"
-        "${N64_RUNTIME_DIR}/N64Recomp/include"
-        "${N64_RUNTIME_DIR}/ultramodern/include"
-        "${N64_RUNTIME_DIR}/thirdparty"
-        "${RECOMP_FRONTEND_DIR}/recompui/include"
-        "${RECOMP_FRONTEND_DIR}/recompui/src"
-        "${RECOMP_FRONTEND_DIR}/recompinput/include"
-        "${SNOWBOARDKIDS_THEME_INCLUDE_DIR}"
-        "${RT64_DIR}/src"
-        "${RT64_DIR}/src/contrib"
-        "${RT64_DIR}/src/contrib/nativefiledialog-extended/src/include"
-        "${CMAKE_BINARY_DIR}/shaders"
-        ${SDL2_INCLUDE_DIRS}
-    )
+    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+        target_include_directories(${SBK_EXE} PRIVATE
+            "${CMAKE_SOURCE_DIR}"
+            "${CMAKE_BINARY_DIR}/generated"
+            "${N64_RUNTIME_DIR}/librecomp/include"
+            "${N64_RUNTIME_DIR}/N64Recomp/include"
+            "${N64_RUNTIME_DIR}/ultramodern/include"
+            "${N64_RUNTIME_DIR}/thirdparty"
+            "${RECOMP_FRONTEND_DIR}/recompui/include"
+            "${RECOMP_FRONTEND_DIR}/recompui/src"
+            "${RECOMP_FRONTEND_DIR}/recompinput/include"
+            "${SNOWBOARDKIDS_THEME_INCLUDE_DIR}"
+            "${RT64_DIR}/src"
+            "${RT64_DIR}/src/contrib"
+            "${RT64_DIR}/src/contrib/nativefiledialog-extended/src/include"
+            "${CMAKE_BINARY_DIR}/shaders"
+            ${SDL2_INCLUDE_DIRS}
+        )
+    endforeach()
 
     target_link_libraries(SnowboardKidsRecompiled PRIVATE
         SnowboardKidsCpu
         SnowboardKidsRsp
-        # RecompFrontend's static input/UI archives have a circular dependency:
-        # recompui references recompinput and recompinput references UI state
-        # symbols such as recompui::controls_page. Re-scan recompui after
-        # recompinput so GNU ld can resolve the reverse edge.
         recompui
         recompinput
         recompui
@@ -369,17 +426,34 @@ if(SBK_BUILD_NATIVE_BOOT)
         Threads::Threads
         ${CMAKE_DL_LIBS}
     )
+
+    target_link_libraries(SnowboardKidsEngine PRIVATE
+        recompui
+        recompinput
+        recompui
+        librecomp
+        ultramodern
+        rt64
+        nfd
+        SDL2::SDL2
+        Threads::Threads
+        ${CMAKE_DL_LIBS}
+    )
+
     if(CMAKE_SYSTEM_NAME MATCHES "Linux")
         target_link_libraries(SnowboardKidsRecompiled PRIVATE atomic)
+        target_link_libraries(SnowboardKidsEngine PRIVATE atomic)
     endif()
 
-    # RecompFrontend resolves Linux assets relative to the process working
-    # directory. Package the shared Snowboard Kids theme assets next to the
-    # diagnostic executable so fonts, promptfont and recomp.rcss are present.
     add_custom_command(TARGET SnowboardKidsRecompiled POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
             "$<TARGET_FILE_DIR:SnowboardKidsRecompiled>/assets"
+    )
+    add_custom_command(TARGET SnowboardKidsEngine POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
+            "$<TARGET_FILE_DIR:SnowboardKidsEngine>/assets"
     )
 endif()
 
@@ -435,14 +509,16 @@ if(SBK_CONTINUATIONS)
     if(NOT TARGET SnowboardKidsRecompiled)
         message(FATAL_ERROR "P4-A backend requires the real native-boot application target")
     endif()
-    foreach(SBK_TARGET SnowboardKidsRecompiled librecomp ultramodern)
+    foreach(SBK_TARGET SnowboardKidsRecompiled SnowboardKidsEngine librecomp ultramodern)
         target_compile_definitions(${SBK_TARGET} PRIVATE SBK_CONTINUATIONS=1)
         target_include_directories(${SBK_TARGET} PRIVATE
             "${CMAKE_SOURCE_DIR}/src" "${N64_RUNTIME_DIR}/N64Recomp/include")
     endforeach()
-    target_sources(SnowboardKidsRecompiled PRIVATE
-        src/continuation/dispatch.cpp src/continuation/execution.cpp
-        src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
+    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+        target_sources(${SBK_EXE} PRIVATE
+            src/continuation/dispatch.cpp src/continuation/execution.cpp
+            src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
+    endforeach()
     # P4 in-memory savestates, P5 audio boundary, P6 .sbks persistence and
     # P7 quick save/load (F5/F8); development trigger behind SBK_P4_SAVESTATE_DEV.
     file(STRINGS "${N64_RUNTIME_DIR}/ultramodern/src/threads.cpp" P4_SAVESTATE_HOOK
@@ -454,10 +530,12 @@ if(SBK_CONTINUATIONS)
     if(NOT SBK_SHUTDOWN_PATCH)
         message(FATAL_ERROR "Runtime shutdown patch missing. Run: python3 scripts/apply-continuation-patches.py")
     endif()
-    target_sources(SnowboardKidsRecompiled PRIVATE
-        src/savestate/snapshot.cpp src/savestate/service.cpp
-        src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
-        src/savestate/host_audio.cpp src/savestate/sbks.cpp src/savestate/storage.cpp
-        src/savestate/driver.cpp src/savestate/toast.cpp src/savestate/dev_trigger.cpp)
+    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+        target_sources(${SBK_EXE} PRIVATE
+            src/savestate/snapshot.cpp src/savestate/service.cpp
+            src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
+            src/savestate/host_audio.cpp src/savestate/sbks.cpp src/savestate/storage.cpp
+            src/savestate/driver.cpp src/savestate/toast.cpp src/savestate/dev_trigger.cpp)
+    endforeach()
     target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
 endif()

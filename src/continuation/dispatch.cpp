@@ -6,8 +6,13 @@ auto& functions() { static std::map<uint64_t, Descriptor> table; return table; }
 auto& tokens() { static std::map<recomp_func_t*, uint64_t> table; return table; }
 }
 bool register_function(Descriptor d) {
-    if (!d.id || !d.step || !d.token || functions().contains(d.id) || tokens().contains(d.token))
-        throw std::logic_error("Duplicate or invalid continuation function descriptor");
+    if (!d.id || !d.step || !d.token)
+        throw std::logic_error("Invalid continuation function descriptor");
+    auto it = functions().find(d.id);
+    if (it != functions().end()) {
+        if (it->second.step == d.step && it->second.token == d.token) return true;
+        throw std::logic_error("Duplicate continuation function descriptor with different handlers");
+    }
     functions().emplace(d.id, d);
     tokens().emplace(d.token, d.id);
     return true;

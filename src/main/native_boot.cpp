@@ -48,14 +48,24 @@
 #include "recomp_theme.h"
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
+#include "module/module_loader.hpp"
 
 namespace sbk {
 void register_overlays();
+module::GameModule g_game_module;
 }
 
+#if !defined(SBK_ROM_FREE_ENGINE)
 extern RspUcodeFunc aspMain;
 extern "C" void recomp_entrypoint(uint8_t* rdram, recomp_context* ctx);
-gpr get_entrypoint_address();
+#endif
+
+gpr get_entrypoint_address() {
+    if (sbk::g_game_module.is_loaded()) {
+        return static_cast<gpr>(static_cast<int32_t>(sbk::g_game_module.api()->entrypoint_address));
+    }
+    return static_cast<gpr>(static_cast<int32_t>(0x80000400u));
+}
 
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx);
 
@@ -569,9 +579,15 @@ ultramodern::input::connected_device_info_t get_connected_device_info(int contro
 }
 
 RspUcodeFunc* get_rsp_microcode(const OSTask* task) {
+    if (sbk::g_game_module.is_loaded()) {
+        auto ucode = sbk::g_game_module.api()->get_rsp_microcode(task);
+        return reinterpret_cast<RspUcodeFunc*>(ucode);
+    }
+#if !defined(SBK_ROM_FREE_ENGINE)
     if (task->t.type == M_AUDTASK) {
         return aspMain;
     }
+#endif
 
     std::fprintf(stderr, "Unknown RSP task type: %" PRIu32 "\n", task->t.type);
     return nullptr;
@@ -594,7 +610,19 @@ void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");
     std::fflush(stdout);
 
-    recomp_entrypoint(rdram, ctx);
+    if (sbk::g_game_module.is_loaded()) {
+        sbk::g_game_module.api()->entrypoint(rdram, ctx);
+    }
+#if !defined(SBK_ROM_FREE_ENGINE)
+    else {
+        recomp_entrypoint(rdram, ctx);
+    }
+#else
+    else {
+        std::fprintf(stderr, "Fatal: No game module loaded in split-runtime engine.\n");
+        std::abort();
+    }
+#endif
 
     std::puts("<<< SNOWBOARD KIDS RECOMP_ENTRYPOINT RETURNED");
     std::fflush(stdout);
@@ -619,27 +647,36 @@ const char* validation_error_name(recomp::RomValidationError error) {
 } // namespace
 
 int main(int argc, char** argv) {
-    if (argc == 2 && std::strcmp(argv[1], "--version") == 0) {
-        std::printf("Snowboard Kids Recompiled %s\ncommit %s\n", SBK_VERSION, SBK_COMMIT);
-        return EXIT_SUCCESS;
-    }
-    if (argc == 2 && std::strcmp(argv[1], "--help") == 0) {
-        std::puts("Usage: SnowboardKidsRecompiled [path-to-your-USA-ROM]\n"
-                  "Without a path, select your own ROM in the file dialog.\n"
-                  "Options: --help, --version");
-        return EXIT_SUCCESS;
-    }
-    if (argc > 2 || (argc == 2 && argv[1][0] == '-')) {
-        std::fprintf(stderr, "Invalid arguments. Use --help for usage.\n");
-        return 2;
+    std::filesystem::path explicit_module_path;
+    std::filesystem::path rom_path;
+
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--version") == 0) {
+            std::printf("Snowboard Kids Recompiled %s\ncommit %s\n", SBK_VERSION, SBK_COMMIT);
+            return EXIT_SUCCESS;
+        }
+        if (std::strcmp(argv[i], "--help") == 0) {
+            std::puts("Usage: SnowboardKidsRecompiled [options] [path-to-your-USA-ROM]\n"
+                      "Without a path, select your own ROM in the file dialog.\n\n"
+                      "Options:\n"
+                      "  --help             Show help options\n"
+                      "  --version          Show version info\n"
+                      "  --module <path>    Explicit path to SnowboardKidsGame dynamic module");
+            return EXIT_SUCCESS;
+        }
+        if (std::strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
+            explicit_module_path = std::filesystem::absolute(argv[++i]);
+            continue;
+        }
+        if (argv[i][0] != '-') {
+            rom_path = std::filesystem::absolute(argv[i]);
+        }
     }
 
     sbk::quiescence::probe_init(
         [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); },
         []() -> uint32_t { return audio_device ? SDL_GetQueuedAudioSize(audio_device) : 0; });
     install_crash_handlers();
-    std::filesystem::path rom_path;
-    if (argc == 2) rom_path = std::filesystem::absolute(argv[1]);
 
     // RecompFrontend resolves its read-only assets against cwd on desktop.
     // Anchor that lookup at the executable, independent of the launch cwd.
@@ -685,7 +722,50 @@ int main(int argc, char** argv) {
         sbk::pfs::set_port_present(port, port == 0 &&
             !(std::getenv("SBK_PFS_ABSENT") &&
               std::strcmp(std::getenv("SBK_PFS_ABSENT"), "1") == 0));
-    const recomp::GameEntry& game = supported_games[0];
+    recomp::GameEntry& game = supported_games[0];
+    game.entrypoint_address = get_entrypoint_address();
+
+    // Attempt to discover and load game module (Model D)
+    std::string mod_err;
+    auto mod_status = sbk::g_game_module.load_candidate(install_dir, explicit_module_path, mod_err);
+    if (mod_status == sbk::module::LoadStatus::Success) {
+        std::printf("[MODULE] Loaded game module from: %s\n", sbk::g_game_module.loaded_path().c_str());
+        SbkEngineApiV1 engine_api{};
+        engine_api.abi_version = 1;
+        engine_api.struct_size = sizeof(SbkEngineApiV1);
+        engine_api.switch_error = [](const char* section, uint32_t jtbl_addr, uint32_t target) {
+            std::fprintf(stderr, "Jump table error in %s: jtbl 0x%08X, target 0x%08X\n",
+                         section ? section : "unknown", jtbl_addr, target);
+            std::abort();
+        };
+        engine_api.dmem = dmem;
+#ifdef SBK_CONTINUATIONS
+        engine_api.continuation_enter = [](uint64_t id, uint8_t* rdram, recomp_context* ctx) {
+            sbk::continuation::enter(id, rdram, ctx);
+        };
+#endif
+        if (!sbk::g_game_module.initialize(engine_api, mod_err)) {
+            std::fprintf(stderr, "Failed to initialize game module: %s\n", mod_err.c_str());
+            return EXIT_FAILURE;
+        }
+#ifdef SBK_CONTINUATIONS
+        const auto* api = sbk::g_game_module.api();
+        for (size_t i = 0; i < api->continuation_count; ++i) {
+            const auto& desc = api->continuations[i];
+            sbk::continuation::Descriptor d{};
+            d.id = desc.id;
+            d.guest_address = desc.guest_address;
+            d.scratch_count = desc.scratch_count;
+            d.step = reinterpret_cast<sbk::continuation::Step*>(desc.step);
+            d.token = reinterpret_cast<recomp_func_t*>(desc.token);
+            d.name = desc.name;
+            sbk::continuation::register_function(d);
+        }
+#endif
+    } else {
+        std::fprintf(stderr, "[MODULE] Candidate load failed (%s): %s\n",
+                     sbk::module::status_string(mod_status), mod_err.c_str());
+    }
 
 #ifdef SBK_CONTINUATIONS
     // Savestates. This arms the P2 coordinator, so it must run before the first
@@ -698,13 +778,22 @@ int main(int argc, char** argv) {
     } else if (std::getenv("SBK_P2_CYCLES")) {
         std::fprintf(stderr, "SAVESTATE disabled: SBK_P2_CYCLES probe already drives the barrier\n");
     } else {
-        // Snapshots restore only into the same generated corpus/manifest.
-        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
-        uint64_t digest = 14695981039346656037ull;
-        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
         sbk::savestate::driver::Config config{};
-        config.build = {digest, 1981, 56};
-        config.rom_hash = game.rom_hash; // select_rom() below verifies the ROM against this XXH3-64
+        if (sbk::g_game_module.is_loaded()) {
+            config.build = {
+                sbk::g_game_module.api()->corpus_digest,
+                sbk::g_game_module.api()->function_count,
+                sbk::g_game_module.api()->hle_count
+            };
+            config.rom_hash = sbk::g_game_module.api()->rom_hash;
+        } else {
+            // Snapshots restore only into the same generated corpus/manifest.
+            constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
+            uint64_t digest = 14695981039346656037ull;
+            for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
+            config.build = {digest, 1981, 56};
+            config.rom_hash = game.rom_hash; // select_rom() below verifies the ROM against this XXH3-64
+        }
         config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
         config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
         config.directory = recomp::get_config_path() / "savestates";
@@ -719,6 +808,7 @@ int main(int argc, char** argv) {
 
     snowboardkids::theme::apply();
     initialize_controls(runtime_dir);
+    game.entrypoint_address = get_entrypoint_address();
     init_frontend_config(game, false); // Mod subsystem is not initialized for this game.
 
     if (!recomp::register_game(game)) {
@@ -750,6 +840,21 @@ int main(int argc, char** argv) {
         std::fprintf(stderr, "The selected file is not the supported Snowboard Kids (USA) ROM.\n");
         return EXIT_FAILURE;
     }
+
+    if (sbk::g_game_module.is_loaded()) {
+        if (!sbk::g_game_module.validate(game.rom_hash, "snowboardkids.n64.us", mod_err)) {
+            std::fprintf(stderr, "Game module validation failed: %s\n", mod_err.c_str());
+            return EXIT_FAILURE;
+        }
+    }
+#if defined(SBK_ROM_FREE_ENGINE)
+    else {
+        std::fprintf(stderr, "Error: No SnowboardKidsGame dynamic module found.\n"
+                             "Please build the game module from your ROM with:\n"
+                             "  python3 scripts/build-game-module.py <path-to-rom>\n");
+        return EXIT_FAILURE;
+    }
+#endif
 
     sbk::register_overlays();
 

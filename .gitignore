@@ -61,3 +61,4 @@ build-release/
 build-tools
 build-release-ci/
 build-ci/
+build-split/

@@ -9,7 +9,8 @@ import zipfile
 BAD_SUFFIXES = {'.z64', '.n64', '.v64', '.rom', '.mpk', '.pak', '.sbks',
                 '.log', '.o', '.obj', '.a', '.lib', '.pdb', '.cmake', '.json'}
 BAD_NAMES = {'cmakecache.txt', 'build.ninja', 'makefile', 'portable.txt',
-             '.git', 'runtime-data', '__pycache__'}
+             '.git', 'runtime-data', '__pycache__',
+             'snowboardkidsgame.so', 'snowboardkidsgame.dll'}
 ROM_MAGIC = (b'\x80\x37\x12\x40', b'\x37\x80\x40\x12', b'\x40\x12\x37\x80')
 PATH_PATTERN = re.compile(rb'/home/[^/\x00\s]+|/Users/[^/\x00\s]+|/tmp/[^\x00\s]+|[A-Za-z]:\\Users\\[^\\\x00\s]+')
 MAX_FILE = 500 * 1024 * 1024
@@ -49,7 +50,9 @@ def audit(archive):
             if PATH_PATTERN.search(data):
                 errors.append(f'personal absolute path: {name}')
         executable = any(name in ('SnowboardKidsRecompiled/SnowboardKidsRecompiled',
-                                  'SnowboardKidsRecompiled/SnowboardKidsRecompiled.exe') for name in names)
+                                  'SnowboardKidsRecompiled/SnowboardKidsRecompiled.exe',
+                                  'SnowboardKidsRecompiled/SnowboardKidsEngine',
+                                  'SnowboardKidsRecompiled/SnowboardKidsEngine.exe') for name in names)
         if not executable:
             errors.append('missing executable')
         if 'SnowboardKidsRecompiled/BUILD-INFO.txt' not in names:
