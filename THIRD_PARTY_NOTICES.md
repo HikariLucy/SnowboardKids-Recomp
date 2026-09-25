@@ -6,19 +6,23 @@ copies available top-level N64Recomp and RT64 license texts.
 
 | Component | Evidence in pinned checkout | Distribution status |
 | --- | --- | --- |
-| N64Recomp | `.deps/N64Recomp/LICENSE` | License file available; nested dependency notices require audit |
-| RT64 | `.deps-renderer/rt64/LICENSE` | License file available; nested dependency notices require audit |
-| N64ModernRuntime | No top-level LICENSE/NOTICE observed at pinned checkout | RELEASE_BLOCKER: determine applicable source and binary terms |
-| RecompFrontend | No top-level LICENSE/NOTICE observed at pinned checkout | RELEASE_BLOCKER: determine applicable source and binary terms |
-| snowboardkids-recomp-theme | No top-level LICENSE/NOTICE observed | RELEASE_BLOCKER: establish asset ownership and redistribution rights |
-| Theme fonts: LatoLatin, Fredoka, NotoEmoji | Font files in theme assets, without adjacent license files | RELEASE_BLOCKER: find and include exact font license texts |
-| Theme promptfont | `assets/promptfont/LICENSE.txt` | Preserve this notice with the font |
-| Theme SVG/PNG/RCSS | Source in pinned theme checkout | RELEASE_BLOCKER: document provenance and rights |
-| SDL2, RmlUi, fmt, tomlplusplus, Rabbitizer, stb, ImGui, DXC, nfd and other transitive code | Present in upstream dependency trees | RELEASE_BLOCKER: inventory linked or bundled components and notices per artifact |
-| Project source | No repository-level LICENSE at baseline | RELEASE_BLOCKER: owner must choose a project license before public distribution |
+| Project source | No repository-level LICENSE in baseline repository | BLOCKER: owner decision required |
+| N64ModernRuntime | `.deps-runtime/N64ModernRuntime/COPYING` (GPL-3.0) | BLOCKER: binary linking imposes GPL-3.0 copyleft and source disclosure terms |
+| N64Recomp | `.deps/N64Recomp/LICENSE` (MIT) | CLEARED: notice included in `licenses/N64Recomp.txt` |
+| RT64 | `.deps-renderer/rt64/LICENSE` (MIT) | CLEARED: notice included in `licenses/RT64.txt` |
+| RecompFrontend | No top-level LICENSE file in pinned tree | BLOCKER: upstream author must provide license grant |
+| SDL2 | Dynamically linked (`libSDL2-2.0.so.0` / `SDL2.dll`) | NOTICE REQUIRED: zlib license terms documented |
+| {fmt} | `.deps/N64Recomp/lib/fmt/LICENSE` (MIT) | CLEARED: MIT notice preserved |
+| RmlUi | `.deps-renderer/RecompFrontend/recompui/lib/RmlUi/LICENSE.txt` (MIT) | CLEARED: MIT notice preserved |
+| toml++ | `.deps/N64Recomp/lib/tomlplusplus/LICENSE` (MIT) | CLEARED: MIT notice preserved |
+| Rabbitizer | `.deps/N64Recomp/lib/rabbitizer/LICENSE` (MIT) | CLEARED: MIT notice preserved |
+| stb | `.deps-renderer/rt64/src/contrib/stb/LICENSE` (MIT / Public Domain) | CLEARED: permissive terms satisfied |
+| Dear ImGui | `.deps-renderer/rt64/src/contrib/imgui/LICENSE.txt` (MIT) | CLEARED: MIT notice preserved |
+| nativefiledialog-extended | `.deps-renderer/rt64/src/contrib/nativefiledialog-extended/LICENSE` (Zlib) | CLEARED: notice included in `licenses/nativefiledialog-extended.txt` |
+| Theme promptfont | `assets/promptfont/LICENSE.txt` (OFL 1.1) | CLEARED: notice bundled with font |
+| Theme fonts (Lato, Fredoka, NotoEmoji) | Unbundled in `assets/` | BLOCKER: OFL Section 2 requires bundled license texts |
+| Theme UI artwork (SVGs, PNGs) | Present in theme assets | BLOCKER: author documentation of distribution rights required |
+| Game-derived code (CPU corpus, RSP) | Generated from user ROM | BLOCKER: legal distribution status of translated commercial game logic unresolved |
 
-The generated CPU corpus, RSP translation and binary contain material derived
-from a user-supplied game. Their redistribution status is unresolved.
-**RELEASE_BLOCKER:** establish a lawful distribution position for these outputs
-before publishing executable artifacts. No ROM or extracted game assets may be
-included in any archive.
+See `docs/LICENSE-AUDIT.md` for complete analysis and component audit.
+No ROM or extracted game assets may be included in any distribution archive.
