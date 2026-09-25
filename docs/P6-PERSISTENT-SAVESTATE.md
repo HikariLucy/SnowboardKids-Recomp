@@ -255,6 +255,49 @@ coordinator refuses to arm. Live: 3/3 startups past the old abort point into
 gameplay (startup retired, 6 owners, no backtrace). P6/P7 persistent live
 remain pending (below).
 
+## P6-XPROC-01
+
+Symptom (human gate, process B): F8 in a fresh process restored the state
+(`RESTORE ok`, all domain hashes equal to the capture, "State loaded", audio
+back) but the image froze and the window did not close. The frontend loop
+kept running (heartbeats to the end of the log); later F8 presses timed out
+in `DrainDevices` with every game owner parked.
+
+Stacks from a hung process (reproduced with the preserved `.sbks`): the Gfx
+thread spun in `WorkloadQueue::advanceToNextWorkload` (workload ring full);
+RT64 Workload waited in `waitForPresentId(913)`; RT64 Present waited in
+`waitForWorkloadId(1821)` for a later present, although present 913 (the
+restored frame from `present_restored_frame`) had already been consumed.
+Present 913 was never published.
+
+Cause: `reset/import_semantic_state` zeroed both RT64 interpolation counter
+sets but kept the color images of the last pre-restore workload. When the
+restored VI framebuffer was one of them (double-buffer parity, about 1 in 2),
+`threadPresent` took the interpolation path with
+`framesToPresent = count = 0`, presented nothing, and skipped
+`notifyPresentId`. The next workload waited on that id forever, so no DP
+completion reached the game (audio kept running), the Graphics participant
+never drained, and shutdown blocked joining the Gfx thread.
+
+Not specific to fresh processes: one process with a dev capture followed by
+restores hung on its first restore. Process A passed by chance (2/2).
+
+Fix: a restore resets host presentation history to the state RT64 assumes
+after one non-interpolated frame: pre-restore color images and interpolated
+targets discarded, every counter set `count = 1` (RT64 asserts
+`displayFrames > 0`), nothing presented or available. No host object is
+serialized and P2 is unchanged. Before the fix the live oracle hung on the
+first of 8 same-process restores (the rest timed out behind it) and on about
+half of cross-process loads; after it, 10/10 and 6/6 passed.
+
+Coverage: `python3 tests/renderer_lifecycle/run.py` (no GPU; real
+`RT64::SharedQueueResources` and the production reset; fails on the old reset)
+and `python3 tests/renderer_lifecycle/run_live.py` (ROM + GPU).
+
+Separate, not fixed here: a quickload during the boot logos, before the game
+created its race-size targets, rolls back with
+`post-install hash mismatch in depth` ("Load failed", state intact).
+
 ## Tests (non-live, measured)
 
 `python3 tests/savestate/run.py` (also `--sanitize`, `--tsan`):

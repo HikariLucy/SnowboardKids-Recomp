@@ -26,11 +26,49 @@ index 33f79ab..16ee1e9 100644
  
              void check_texture_pack_actions();
              void check_refresh_rate_changes();
+diff --git a/recompui/src/renderer/rt64_presentation_history.h b/recompui/src/renderer/rt64_presentation_history.h
+new file mode 100644
+index 0000000..cfec278
+--- /dev/null
++++ b/recompui/src/renderer/rt64_presentation_history.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include <mutex>
++
++#include "common/rt64_user_configuration.h"
++#include "hle/rt64_shared_queue_resources.h"
++
++namespace recompui::renderer {
++    // Host presentation history is never restored: the next frame after a
++    // restore is one presentable, non-interpolated frame. RT64's present/workload
++    // handshake requires every counter set to describe at least one display frame
++    // (the workload queue asserts displayFrames > 0). A zeroed set makes the
++    // present queue present zero frames for an interpolation candidate and never
++    // publish its presentId, so the next workload waits on it forever. Color
++    // images of the pre-restore workload no longer exist and must not select
++    // that path. Callers hold the renderer quiescent.
++    inline void reset_shared_presentation_history(RT64::SharedQueueResources &shared) {
++        {
++            std::scoped_lock<std::mutex> lock(shared.managerMutex);
++            shared.colorImageAddressVector.clear();
++            shared.colorImageAddressSet.clear();
++            shared.interpolatedColorTargets.clear();
++        }
++        {
++            std::scoped_lock<std::mutex> lock(shared.interpolatedMutex);
++            for (auto &counters : shared.interpolatedFrames) {
++                counters = {};
++                counters.count = 1;
++            }
++        }
++    }
++}
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index f8f8089..496ff17 100644
+index f8f8089..e583a00 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
-@@ -1,9 +1,16 @@
+@@ -1,9 +1,17 @@
 +#include "quiescence/quiescence.hpp"
 +#include "quiescence/renderer_state.hpp"
 +#include "xxHash/xxh3.h"
@@ -44,10 +82,11 @@ index f8f8089..496ff17 100644
 +#include "hle/rt64_rdp.h"
 +#include "hle/rt64_framebuffer.h"
 +#include "hle/rt64_framebuffer_manager.h"
++#include "rt64_presentation_history.h"
  #include "rt64_render_hooks.h"
  #include "overloaded.h"
  
-@@ -352,6 +359,490 @@ void renderer::RT64Context::update_screen() {
+@@ -352,6 +360,487 @@ void renderer::RT64Context::update_screen() {
      app->updateScreen();
  }
  
@@ -237,6 +276,13 @@ index f8f8089..496ff17 100644
 +    return true;
 +}
 +
++static void reset_presentation_history(RT64::Application* app) {
++    renderer::reset_shared_presentation_history(*app->sharedQueueResources);
++    app->state->viHistory = RT64::VIHistory();
++    app->presentQueue->viHistory = RT64::VIHistory();
++    app->state->lastScreenFactorCounter = 0;
++}
++
 +bool renderer::RT64Context::reset_semantic_state() {
 +    if (!app || !app->state) return false;
 +
@@ -248,12 +294,7 @@ index f8f8089..496ff17 100644
 +        app->state->renderFramebufferManager->destroyAll();
 +    }
 +
-+    app->state->viHistory = RT64::VIHistory();
-+    app->presentQueue->viHistory = RT64::VIHistory();
-+    app->sharedQueueResources->interpolatedFrames[0] = {};
-+    app->sharedQueueResources->interpolatedFrames[1] = {};
-+    app->sharedQueueResources->interpolatedColorTargets.clear();
-+    app->state->lastScreenFactorCounter = 0;
++    reset_presentation_history(app.get());
 +
 +    sbk::quiescence::note("renderer-semantic", "reset");
 +    return true;
@@ -406,12 +447,7 @@ index f8f8089..496ff17 100644
 +        }
 +    }
 +
-+    app->state->viHistory = RT64::VIHistory();
-+    app->presentQueue->viHistory = RT64::VIHistory();
-+    app->sharedQueueResources->interpolatedFrames[0] = {};
-+    app->sharedQueueResources->interpolatedFrames[1] = {};
-+    app->sharedQueueResources->interpolatedColorTargets.clear();
-+    app->state->lastScreenFactorCounter = 0;
++    reset_presentation_history(app.get());
 +
 +    sbk::quiescence::note("renderer-semantic", "import", size);
 +    return true;
