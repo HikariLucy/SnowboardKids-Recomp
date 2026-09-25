@@ -1,0 +1,10 @@
+name: Release artifact readiness
+on:
+  workflow_dispatch:
+jobs:
+  readiness:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check release inputs and license gates
+        run: python3 scripts/check_release_readiness.py
