@@ -61,9 +61,38 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--through', choices=('character_select', 'race_active'),
                         default='race_active')
+    parser.add_argument('--executable', type=Path, default=None,
+                        help='Path to executable (SnowboardKidsEngine or SnowboardKidsRecompiled)')
+    parser.add_argument('--module', type=Path, default=None,
+                        help='Path to SnowboardKidsGame dynamic module')
+    parser.add_argument('--rom', type=Path, default=None,
+                        help='Path to Snowboard Kids (USA) ROM')
     args = parser.parse_args()
-    build = ROOT / 'build-renderer-stack'
-    executable = (build / 'SnowboardKidsRecompiled').resolve()
+
+    build = ROOT / 'build-split' if (ROOT / 'build-split').exists() else ROOT / 'build-renderer-stack'
+    executable = args.executable
+    if not executable:
+        if (build / 'SnowboardKidsEngine').exists():
+            executable = build / 'SnowboardKidsEngine'
+        else:
+            executable = build / 'SnowboardKidsRecompiled'
+    executable = executable.resolve()
+
+    rom = args.rom
+    if not rom:
+        candidates = [
+            build / 'runtime-data/snowboardkids.n64.us.z64',
+            ROOT.parent / 'snowboardkids.z64',
+            ROOT.parent / 'SnowboardKids-Recomp-compat/build-renderer-stack/runtime-data/snowboardkids.n64.us.z64',
+        ]
+        for c in candidates:
+            if c.exists():
+                rom = c.resolve()
+                break
+    if not rom or not rom.exists():
+        print(f'FAIL: ROM file not found: {rom}')
+        return 1
+
     with open('/tmp/sbk-p4a-live-navigation.lock', 'w') as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -71,12 +100,12 @@ def main():
             print('FAIL: another navigation harness is running')
             return 1
         if instances(executable):
-            print('FAIL: SnowboardKidsRecompiled already running; no instance launched')
+            print(f'FAIL: {executable.name} already running; no instance launched')
             return 1
-        return run(build, executable, args.through)
+        return run(build, executable, args.through, rom, args.module)
 
 
-def run(build, executable, through):
+def run(build, executable, through, rom_path, module_path=None):
     stages = STAGES[:STAGES.index(through) + 1]
     seen = []
     backend = boot = demo = False
@@ -97,9 +126,13 @@ def run(build, executable, through):
                    SBK_P2_CONTROL_FILE=str(control), SBK_P4A_LIVE_NAVIGATION='1')
         started = time.monotonic()
         deadline = started + STAGE_TIMEOUTS[0]
+        cmd = [str(executable)]
+        if module_path:
+            cmd.extend(['--module', str(module_path.resolve())])
+        cmd.append(str(rom_path))
         with log_path.open('w') as log, selectors.DefaultSelector() as selector:
             process = subprocess.Popen(
-                [str(executable), str(build / 'runtime-data/snowboardkids.n64.us.z64')],
+                cmd,
                 cwd=build, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 start_new_session=True)
             try:
