@@ -84,3 +84,30 @@ The decompilation project is a research reference and is **not** itself a PC por
 ## Disclaimer
 
 This is an unofficial preservation and reverse-engineering research project. Snowboard Kids and related trademarks/assets belong to their respective rights holders.
+
+## Native port development build
+
+The current port is code-side validated through boot, input, savestates,
+audio and Controller Pak tests; full compatibility and several physical/live
+gates remain open. ROMs and proprietary game data are not distributed. The
+supported game is **Snowboard Kids (USA)**, game code `NSKE`; the supported
+ROM identity is documented in [release engineering](docs/RELEASE-ENGINEERING.md).
+
+On Linux, install Git, CMake >= 3.20, Ninja, Clang, Python 3, pkg-config and
+development packages for SDL2, FreeType and GTK3. Build the matching USA ELF
+locally from your legally obtained ROM, then set `SBK_ROM` and `SBK_ELF` to
+absolute paths and run `bash scripts/build-release.sh`. This bootstraps exact
+pinned dependencies and creates `build-release/SnowboardKidsRecompiled`.
+Run it with your ROM path or with no argument to open the ROM selector.
+`--help` and `--version` need no ROM. See [RUNNING.md](RUNNING.md) for controls,
+savestates, Pak data locations and troubleshooting.
+
+A ROM-free subset can run with `cmake -S . -B build-ci -G Ninja
+-DSBK_ROM_FREE_CI=ON`, `cmake --build build-ci`, then
+`ctest --test-dir build-ci --output-on-failure` after bootstrapping the pinned
+runtime headers. Public CI does not use a ROM. Binary artifacts are blocked
+until generated-input and distribution-rights issues in
+[release engineering](docs/RELEASE-ENGINEERING.md) are resolved. Contributions
+should preserve the pin/patch lock and keep user data out of commits. The
+project license remains to be selected by the owner before public binary
+release.

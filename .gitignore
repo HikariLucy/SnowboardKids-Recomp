@@ -53,3 +53,11 @@ build-rom-inspect/
 build-runtime-smoke/
 .deps-renderer/
 build-renderer-stack/
+build-release/
+# Local dependency links and release verification builds
+.deps
+.deps-runtime
+.deps-renderer
+build-tools
+build-release-ci/
+build-ci/
