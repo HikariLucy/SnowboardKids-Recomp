@@ -52,20 +52,53 @@ int main(int argc, char** argv) {
         bool ok = module.validate(0xF384619787B78D4BULL, "snowboardkids.n64.us", err);
         CHECK(ok, err.c_str());
 
+        // Valid with matching corpus digest
+        ok = module.validate(0xF384619787B78D4BULL, "snowboardkids.n64.us", err, 0x1234567890ABCDEFULL);
+        CHECK(ok, err.c_str());
+
+        // Corpus mismatch test
+        sbk::module::LoadStatus corpus_err_status = sbk::module::LoadStatus::Success;
+        ok = module.validate(0xF384619787B78D4BULL, "snowboardkids.n64.us", err, 0x9999888877776666ULL, &corpus_err_status);
+        CHECK(!ok, "Corpus mismatch must fail validation");
+        CHECK(corpus_err_status == sbk::module::LoadStatus::CorpusMismatch, "Status must be CorpusMismatch");
+        CHECK(err.find("CORPUS_MISMATCH") != std::string::npos, "Error must distinguish CORPUS_MISMATCH");
+        std::cout << "[PASS] Corpus mismatch cleanly rejected: " << err << std::endl;
+
         // ROM hash mismatch
-        ok = module.validate(0x1111222233334444ULL, "snowboardkids.n64.us", err);
+        sbk::module::LoadStatus rom_err_status = sbk::module::LoadStatus::Success;
+        ok = module.validate(0x1111222233334444ULL, "snowboardkids.n64.us", err, 0, &rom_err_status);
         CHECK(!ok, "ROM mismatch must fail validation");
-        CHECK(!err.empty(), "Error message must be set on ROM mismatch");
+        CHECK(rom_err_status == sbk::module::LoadStatus::RomMismatch, "Status must be RomMismatch");
+        CHECK(err.find("WRONG_ROM") != std::string::npos, "Error must distinguish WRONG_ROM");
         std::cout << "[PASS] ROM mismatch cleanly rejected: " << err << std::endl;
 
         // Game ID mismatch
-        ok = module.validate(0xF384619787B78D4BULL, "supermario64.n64.us", err);
+        sbk::module::LoadStatus game_err_status = sbk::module::LoadStatus::Success;
+        ok = module.validate(0xF384619787B78D4BULL, "supermario64.n64.us", err, 0, &game_err_status);
         CHECK(!ok, "Game ID mismatch must fail validation");
-        CHECK(!err.empty(), "Error message must be set on Game ID mismatch");
+        CHECK(game_err_status == sbk::module::LoadStatus::GameIdMismatch, "Status must be GameIdMismatch");
+        CHECK(err.find("WRONG_GAME") != std::string::npos, "Error must distinguish WRONG_GAME");
         std::cout << "[PASS] Game ID mismatch cleanly rejected: " << err << std::endl;
     }
 
-    // 4. Initialize module
+    // 4. Candidate paths test
+    {
+        std::filesystem::path app_dir = "/fake/app";
+        std::filesystem::path user_data = "/fake/userdata";
+        auto candidates = sbk::module::GameModule::candidate_paths(app_dir, user_data);
+        CHECK(!candidates.empty(), "Candidate paths must not be empty");
+        bool found_userdata = false;
+        for (const auto& c : candidates) {
+            if (c.string().find("/fake/userdata/modules") != std::string::npos) {
+                found_userdata = true;
+                break;
+            }
+        }
+        CHECK(found_userdata, "Candidate paths must search user data modules directory");
+        std::cout << "[PASS] User data candidate search path verified" << std::endl;
+    }
+
+    // 5. Initialize module
     {
         SbkEngineApiV1 engine_api{};
         engine_api.abi_version = 1;
@@ -75,7 +108,7 @@ int main(int argc, char** argv) {
         std::cout << "[PASS] Module initialize() completed" << std::endl;
     }
 
-    // 5. Entrypoint invocation
+    // 6. Entrypoint invocation
     {
         std::vector<uint8_t> rdram(4096, 0);
         module.api()->entrypoint(rdram.data(), nullptr);
@@ -84,14 +117,14 @@ int main(int argc, char** argv) {
         std::cout << "[PASS] Synthetic entrypoint verified" << std::endl;
     }
 
-    // 6. RSP resolver
+    // 7. RSP resolver
     {
         auto ucode = module.api()->get_rsp_microcode(nullptr);
         CHECK(ucode != nullptr, "RSP microcode function pointer must be non-null");
         std::cout << "[PASS] RSP microcode resolver verified" << std::endl;
     }
 
-    // 7. Continuation step dispatch
+    // 8. Continuation step dispatch
     {
         CHECK(module.api()->continuation_count == 1, "Expected 1 synthetic continuation");
         const auto& desc = module.api()->continuations[0];
@@ -118,7 +151,7 @@ int main(int argc, char** argv) {
         std::cout << "[PASS] Continuation step dispatch across module boundary verified" << std::endl;
     }
 
-    // 8. Clean unload
+    // 9. Clean unload
     {
         module.unload();
         CHECK(!module.is_loaded(), "Module must report !is_loaded() after unload()");

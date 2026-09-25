@@ -644,11 +644,53 @@ const char* validation_error_name(recomp::RomValidationError error) {
     return "Unknown";
 }
 
+static int invoke_local_module_builder(const std::filesystem::path& install_dir,
+                                       const std::filesystem::path& rom_path,
+                                       const std::filesystem::path& target_dir) {
+    std::filesystem::path script;
+    if (const char* env_script = std::getenv("SBK_BUILDER_SCRIPT")) {
+        if (std::filesystem::exists(env_script)) {
+            script = env_script;
+        }
+    }
+    if (script.empty()) {
+        std::vector<std::filesystem::path> script_candidates = {
+            install_dir / "scripts" / "build-game-module.py",
+            install_dir / "build-game-module.py",
+            install_dir / ".." / "scripts" / "build-game-module.py",
+            std::filesystem::current_path() / "scripts" / "build-game-module.py",
+            std::filesystem::current_path() / ".." / "scripts" / "build-game-module.py",
+            std::filesystem::current_path() / "build-game-module.py"
+        };
+        for (const auto& c : script_candidates) {
+            if (std::filesystem::exists(c)) {
+                script = std::filesystem::canonical(c);
+                break;
+            }
+        }
+    }
+    if (script.empty()) {
+        std::fprintf(stderr, "Cannot locate build-game-module.py in install or working directories.\n");
+        return 2;
+    }
+
+    std::string cmd;
+#if defined(_WIN32)
+    cmd = "python \"" + script.string() + "\" \"" + rom_path.string() + "\" --out-dir \"" + target_dir.string() + "\"";
+#else
+    cmd = "python3 \"" + script.string() + "\" \"" + rom_path.string() + "\" --out-dir \"" + target_dir.string() + "\"";
+#endif
+    std::printf("[BUILDER] Running: %s\n", cmd.c_str());
+    return std::system(cmd.c_str());
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
     std::filesystem::path explicit_module_path;
     std::filesystem::path rom_path;
+    std::filesystem::path build_module_rom;
+    std::filesystem::path validate_module_path;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--version") == 0) {
@@ -656,21 +698,55 @@ int main(int argc, char** argv) {
             return EXIT_SUCCESS;
         }
         if (std::strcmp(argv[i], "--help") == 0) {
-            std::puts("Usage: SnowboardKidsRecompiled [options] [path-to-your-USA-ROM]\n"
+            std::puts("Usage: SnowboardKidsEngine [options] [path-to-your-USA-ROM]\n"
                       "Without a path, select your own ROM in the file dialog.\n\n"
                       "Options:\n"
-                      "  --help             Show help options\n"
-                      "  --version          Show version info\n"
-                      "  --module <path>    Explicit path to SnowboardKidsGame dynamic module");
+                      "  --help                 Show help options\n"
+                      "  --version              Show version info\n"
+                      "  --module <path>        Explicit path to SnowboardKidsGame dynamic module\n"
+                      "  --rom <path>           Explicit path to Snowboard Kids (USA) ROM\n"
+                      "  --build-module <rom>   Build and install game module from specified ROM and exit\n"
+                      "  --validate-module <mod> Validate specified module ABI and print metadata");
             return EXIT_SUCCESS;
+        }
+        if (std::strcmp(argv[i], "--validate-module") == 0 && i + 1 < argc) {
+            validate_module_path = std::filesystem::absolute(argv[++i]);
+            continue;
+        }
+        if (std::strcmp(argv[i], "--build-module") == 0 && i + 1 < argc) {
+            build_module_rom = std::filesystem::absolute(argv[++i]);
+            continue;
         }
         if (std::strcmp(argv[i], "--module") == 0 && i + 1 < argc) {
             explicit_module_path = std::filesystem::absolute(argv[++i]);
             continue;
         }
+        if (std::strcmp(argv[i], "--rom") == 0 && i + 1 < argc) {
+            rom_path = std::filesystem::absolute(argv[++i]);
+            continue;
+        }
         if (argv[i][0] != '-') {
             rom_path = std::filesystem::absolute(argv[i]);
         }
+    }
+
+    if (!validate_module_path.empty()) {
+        std::string err;
+        sbk::module::GameModule mod;
+        auto st = mod.load(validate_module_path, err);
+        if (st != sbk::module::LoadStatus::Success) {
+            std::fprintf(stderr, "MODULE_LOAD_ERROR (%s): %s\n", sbk::module::status_string(st), err.c_str());
+            return 1;
+        }
+        if (!mod.validate(0xF384619787B78D4BULL, "snowboardkids.n64.us", err)) {
+            std::fprintf(stderr, "MODULE_VALIDATION_ERROR: %s\n", err.c_str());
+            return 1;
+        }
+        const auto* api = mod.api();
+        std::printf("MODULE_VALID: magic=0x%016llX abi=%u corpus=0x%016llX funcs=%u hle=%u\n",
+                    (unsigned long long)api->magic, api->abi_version,
+                    (unsigned long long)api->corpus_digest, api->function_count, api->hle_count);
+        return 0;
     }
 
     sbk::quiescence::probe_init(
@@ -716,6 +792,18 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    if (!build_module_rom.empty()) {
+        std::filesystem::path target_modules_dir = runtime_dir / "modules" / "snowboardkids-us";
+        int res = invoke_local_module_builder(install_dir, build_module_rom, target_modules_dir);
+        if (res == 0) {
+            std::puts("[BUILDER] Module built and installed successfully.");
+            return EXIT_SUCCESS;
+        } else {
+            std::fprintf(stderr, "[BUILDER] Module build failed with exit code %d.\n", res);
+            return EXIT_FAILURE;
+        }
+    }
+
     recomp::register_config_path(runtime_dir);
     sbk::pfs::configure(recomp::get_config_path());
     for (int port = 0; port < 4; ++port)
@@ -724,11 +812,95 @@ int main(int argc, char** argv) {
               std::strcmp(std::getenv("SBK_PFS_ABSENT"), "1") == 0));
     recomp::GameEntry& game = supported_games[0];
     game.entrypoint_address = get_entrypoint_address();
+    if (!recomp::register_game(game)) {
+        std::fprintf(stderr, "Failed to register Snowboard Kids\n");
+        return EXIT_FAILURE;
+    }
 
-    // Attempt to discover and load game module (Model D)
+    // Attempt to discover and load game module (checking user data directory first)
     std::string mod_err;
-    auto mod_status = sbk::g_game_module.load_candidate(install_dir, explicit_module_path, mod_err);
-    if (mod_status == sbk::module::LoadStatus::Success) {
+    auto mod_status = sbk::g_game_module.load_candidate(install_dir, runtime_dir, explicit_module_path, mod_err);
+
+    // First-run state machine if module is missing
+    if (!sbk::g_game_module.is_loaded()) {
+#if defined(SBK_ROM_FREE_ENGINE)
+        std::printf("[FIRST-RUN] No compatible Snowboard Kids game module found (%s).\n",
+                    sbk::module::status_string(mod_status));
+
+        if (rom_path.empty()) {
+            if (const char* env_rom = std::getenv("SBK_ROM_PATH")) {
+                rom_path = env_rom;
+            } else {
+                std::filesystem::path last_rom_file = runtime_dir / "last_rom_path.txt";
+                if (std::filesystem::exists(last_rom_file)) {
+                    std::ifstream ifs(last_rom_file);
+                    std::string line;
+                    if (std::getline(ifs, line) && !line.empty()) {
+                        std::filesystem::path saved_path(line);
+                        if (std::filesystem::exists(saved_path)) {
+                            rom_path = saved_path;
+                            std::printf("[FIRST-RUN] Using remembered ROM path: %s\n", rom_path.string().c_str());
+                        }
+                    }
+                }
+            }
+        }
+
+        if (rom_path.empty()) {
+            std::puts("[FIRST-RUN] Please select your Snowboard Kids (USA) ROM to generate the local game module...");
+            if (NFD_Init() != NFD_OKAY) {
+                std::fprintf(stderr, "Cannot open ROM file dialog: %s\n"
+                                     "Please specify ROM via command line: SnowboardKidsEngine <path-to-rom>\n",
+                             NFD_GetError());
+                return EXIT_FAILURE;
+            }
+            bool selected = false;
+            recompui::file::open_file_dialog([&](bool success, const std::filesystem::path& path) {
+                selected = success;
+                if (success) rom_path = path;
+            });
+            NFD_Quit();
+            if (!selected) {
+                std::puts("[FIRST-RUN] ROM selection cancelled. Exiting cleanly.");
+                return EXIT_SUCCESS;
+            }
+        }
+
+        std::u8string game_id = game.game_id;
+        const auto val = recomp::select_rom(rom_path, game_id);
+        if (val != recomp::RomValidationError::Good) {
+            std::fprintf(stderr, "[FIRST-RUN] ERROR: The selected file is not a supported Snowboard Kids (USA) ROM (%s).\n",
+                         validation_error_name(val));
+            return EXIT_FAILURE;
+        }
+
+        {
+            std::ofstream ofs(runtime_dir / "last_rom_path.txt");
+            if (ofs) ofs << rom_path.string() << "\n";
+        }
+
+        std::filesystem::path target_modules_dir = runtime_dir / "modules" / "snowboardkids-us";
+        int build_res = invoke_local_module_builder(install_dir, rom_path, target_modules_dir);
+        if (build_res != 0) {
+            std::fprintf(stderr, "[FIRST-RUN] Local module build failed with exit code %d.\n", build_res);
+            return EXIT_FAILURE;
+        }
+
+        mod_status = sbk::g_game_module.load_candidate(install_dir, runtime_dir, explicit_module_path, mod_err);
+        if (mod_status != sbk::module::LoadStatus::Success) {
+            std::fprintf(stderr, "[FIRST-RUN] Failed to load newly built module (%s): %s\n",
+                         sbk::module::status_string(mod_status), mod_err.c_str());
+            return EXIT_FAILURE;
+        }
+        std::printf("[FIRST-RUN] Successfully loaded newly installed game module: %s\n",
+                    sbk::g_game_module.loaded_path().c_str());
+#else
+        std::fprintf(stderr, "[MODULE] Candidate load failed (%s): %s\n",
+                     sbk::module::status_string(mod_status), mod_err.c_str());
+#endif
+    }
+
+    if (sbk::g_game_module.is_loaded()) {
         std::printf("[MODULE] Loaded game module from: %s\n", sbk::g_game_module.loaded_path().c_str());
         SbkEngineApiV1 engine_api{};
         engine_api.abi_version = 1;
@@ -762,9 +934,6 @@ int main(int argc, char** argv) {
             sbk::continuation::register_function(d);
         }
 #endif
-    } else {
-        std::fprintf(stderr, "[MODULE] Candidate load failed (%s): %s\n",
-                     sbk::module::status_string(mod_status), mod_err.c_str());
     }
 
 #ifdef SBK_CONTINUATIONS
@@ -811,9 +980,19 @@ int main(int argc, char** argv) {
     game.entrypoint_address = get_entrypoint_address();
     init_frontend_config(game, false); // Mod subsystem is not initialized for this game.
 
-    if (!recomp::register_game(game)) {
-        std::fprintf(stderr, "Failed to register Snowboard Kids\n");
-        return EXIT_FAILURE;
+
+    if (rom_path.empty()) {
+        std::filesystem::path last_rom_file = runtime_dir / "last_rom_path.txt";
+        if (std::filesystem::exists(last_rom_file)) {
+            std::ifstream ifs(last_rom_file);
+            std::string line;
+            if (std::getline(ifs, line) && !line.empty()) {
+                std::filesystem::path saved_path(line);
+                if (std::filesystem::exists(saved_path)) {
+                    rom_path = saved_path;
+                }
+            }
+        }
     }
 
     if (rom_path.empty()) {
@@ -831,6 +1010,10 @@ int main(int argc, char** argv) {
             std::puts("ROM selection cancelled.");
             return EXIT_SUCCESS;
         }
+    }
+    {
+        std::ofstream ofs(runtime_dir / "last_rom_path.txt");
+        if (ofs) ofs << rom_path.string() << "\n";
     }
     std::u8string game_id = game.game_id;
     const auto validation = recomp::select_rom(rom_path, game_id);

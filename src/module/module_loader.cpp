@@ -24,9 +24,12 @@ const char* status_string(LoadStatus status) {
         case LoadStatus::NullApi: return "Module export returned null API pointer";
         case LoadStatus::InvalidMagic: return "Invalid module magic: not a valid SBK game module";
         case LoadStatus::UnsupportedAbi: return "Unsupported module ABI version";
+        case LoadStatus::ModuleTooOld: return "MODULE_TOO_OLD: Module ABI is older than required by engine";
+        case LoadStatus::ModuleTooNew: return "MODULE_TOO_NEW: Module ABI is newer than supported by engine";
         case LoadStatus::InvalidStructSize: return "Module struct size is smaller than expected ABI size";
-        case LoadStatus::RomMismatch: return "Module was generated for a different ROM image";
-        case LoadStatus::GameIdMismatch: return "Module game ID does not match expected Snowboard Kids identifier";
+        case LoadStatus::RomMismatch: return "WRONG_ROM: Module was generated for a different ROM image";
+        case LoadStatus::GameIdMismatch: return "WRONG_GAME: Module game ID does not match expected Snowboard Kids identifier";
+        case LoadStatus::CorpusMismatch: return "CORPUS_MISMATCH: Module continuation corpus does not match engine expectation";
         case LoadStatus::MissingMandatorySymbols: return "Module is missing mandatory function pointers";
         case LoadStatus::InitFailed: return "Module initialization returned failure";
     }
@@ -96,7 +99,7 @@ LoadStatus GameModule::load(const std::filesystem::path& path, std::string& erro
 #endif
 
     if (!symbol) {
-        error_out = std::string("Export symbol '") + SBK_MODULE_EXPORT_SYMBOL + "' not found in " + path.string();
+        error_out = std::string("MISSING_EXPORT: Export symbol '") + SBK_MODULE_EXPORT_SYMBOL + "' not found in " + path.string();
 #if defined(_WIN32)
         FreeLibrary(static_cast<HMODULE>(handle));
 #else
@@ -131,15 +134,26 @@ LoadStatus GameModule::load(const std::filesystem::path& path, std::string& erro
         return LoadStatus::InvalidMagic;
     }
 
-    if (api->abi_version != SBK_MODULE_ABI_VERSION) {
-        error_out = "ABI version mismatch: module is version " + std::to_string(api->abi_version) +
-                    ", engine requires version " + std::to_string(SBK_MODULE_ABI_VERSION);
+    if (api->abi_version < SBK_MODULE_ABI_VERSION) {
+        error_out = "MODULE_TOO_OLD: Module ABI version " + std::to_string(api->abi_version) +
+                    " is older than required ABI version " + std::to_string(SBK_MODULE_ABI_VERSION);
 #if defined(_WIN32)
         FreeLibrary(static_cast<HMODULE>(handle));
 #else
         dlclose(handle);
 #endif
-        return LoadStatus::UnsupportedAbi;
+        return LoadStatus::ModuleTooOld;
+    }
+
+    if (api->abi_version > SBK_MODULE_ABI_VERSION) {
+        error_out = "MODULE_TOO_NEW: Module ABI version " + std::to_string(api->abi_version) +
+                    " is newer than supported ABI version " + std::to_string(SBK_MODULE_ABI_VERSION);
+#if defined(_WIN32)
+        FreeLibrary(static_cast<HMODULE>(handle));
+#else
+        dlclose(handle);
+#endif
+        return LoadStatus::ModuleTooNew;
     }
 
     if (api->struct_size < sizeof(SbkGameModuleApiV1)) {
@@ -172,24 +186,38 @@ LoadStatus GameModule::load(const std::filesystem::path& path, std::string& erro
 
 bool GameModule::validate(uint64_t expected_rom_hash,
                           const char* expected_game_id,
-                          std::string& error_out) const {
+                          std::string& error_out,
+                          uint64_t expected_corpus_digest,
+                          LoadStatus* specific_error) const {
     if (!is_loaded()) {
         error_out = "No module currently loaded";
         return false;
     }
 
     if (expected_rom_hash != 0 && api_->rom_hash != 0 && api_->rom_hash != expected_rom_hash) {
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "ROM hash mismatch: module was built for 0x%016llX, expected 0x%016llX",
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "WRONG_ROM: Module was built for ROM hash 0x%016llX, expected 0x%016llX",
                       static_cast<unsigned long long>(api_->rom_hash),
                       static_cast<unsigned long long>(expected_rom_hash));
         error_out = buf;
+        if (specific_error) *specific_error = LoadStatus::RomMismatch;
         return false;
     }
 
     if (expected_game_id && api_->game_id && std::strcmp(api_->game_id, expected_game_id) != 0) {
-        error_out = std::string("Game ID mismatch: module has '") + api_->game_id +
+        error_out = std::string("WRONG_GAME: Module game ID '") + api_->game_id +
                     "', expected '" + expected_game_id + "'";
+        if (specific_error) *specific_error = LoadStatus::GameIdMismatch;
+        return false;
+    }
+
+    if (expected_corpus_digest != 0 && api_->corpus_digest != 0 && api_->corpus_digest != expected_corpus_digest) {
+        char buf[160];
+        std::snprintf(buf, sizeof(buf), "CORPUS_MISMATCH: Module corpus digest 0x%016llX differs from expected 0x%016llX",
+                      static_cast<unsigned long long>(api_->corpus_digest),
+                      static_cast<unsigned long long>(expected_corpus_digest));
+        error_out = buf;
+        if (specific_error) *specific_error = LoadStatus::CorpusMismatch;
         return false;
     }
 
@@ -232,6 +260,7 @@ void GameModule::unload() {
 
 std::vector<std::filesystem::path> GameModule::candidate_paths(
     const std::filesystem::path& app_dir,
+    const std::filesystem::path& user_data_dir,
     const std::filesystem::path& explicit_path) {
     std::vector<std::filesystem::path> candidates;
 
@@ -251,22 +280,32 @@ std::vector<std::filesystem::path> GameModule::candidate_paths(
     const std::string mod_name = "SnowboardKidsGame.so";
 #endif
 
-    if (!app_dir.empty()) {
+    // User data directory candidates (FASE 5)
+    if (!user_data_dir.empty()) {
+        candidates.push_back(user_data_dir / "modules" / "snowboardkids-us" / mod_name);
+        candidates.push_back(user_data_dir / "modules" / mod_name);
+    } else {
+        candidates.push_back(std::filesystem::current_path() / "modules" / "snowboardkids-us" / mod_name);
+        candidates.push_back(std::filesystem::current_path() / "modules" / mod_name);
+        candidates.push_back(std::filesystem::current_path() / mod_name);
+        candidates.push_back(std::filesystem::current_path() / "build" / mod_name);
+    }
+
+    // Only search application directory if no user data directory was provided
+    if (user_data_dir.empty() && !app_dir.empty()) {
+        candidates.push_back(app_dir / "modules" / "snowboardkids-us" / mod_name);
         candidates.push_back(app_dir / "modules" / mod_name);
         candidates.push_back(app_dir / mod_name);
     }
-
-    candidates.push_back(std::filesystem::current_path() / mod_name);
-    candidates.push_back(std::filesystem::current_path() / "build" / mod_name);
-    candidates.push_back(std::filesystem::current_path() / "modules" / mod_name);
 
     return candidates;
 }
 
 LoadStatus GameModule::load_candidate(const std::filesystem::path& app_dir,
+                                      const std::filesystem::path& user_data_dir,
                                       const std::filesystem::path& explicit_path,
                                       std::string& error_out) {
-    auto candidates = candidate_paths(app_dir, explicit_path);
+    auto candidates = candidate_paths(app_dir, user_data_dir, explicit_path);
     std::string last_error;
     for (const auto& path : candidates) {
         if (std::filesystem::exists(path)) {
@@ -280,7 +319,7 @@ LoadStatus GameModule::load_candidate(const std::filesystem::path& app_dir,
     if (!last_error.empty()) {
         error_out = last_error;
     } else {
-        error_out = "No game module found in searched paths. Run scripts/build-game-module.py with your USA ROM.";
+        error_out = "No game module found in searched candidate paths.";
     }
     return LoadStatus::FileNotFound;
 }

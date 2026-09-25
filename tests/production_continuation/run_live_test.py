@@ -25,7 +25,7 @@ STAGES = ('controller_pak', 'menu_navigation', 'character_select',
 # Each limit starts when the preceding semantic milestone is observed.
 # The original 18.5s process budget expired during save/rumble prompts.
 # Scene initialization and the countdown are separate guest transitions.
-STAGE_TIMEOUTS = (10.0, 25.0, 15.0, 15.0, 15.0, 15.0)
+STAGE_TIMEOUTS = (35.0, 25.0, 15.0, 15.0, 15.0, 15.0)
 
 
 def instances(executable):

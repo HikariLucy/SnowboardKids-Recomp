@@ -17,9 +17,12 @@ enum class LoadStatus {
     NullApi,
     InvalidMagic,
     UnsupportedAbi,
+    ModuleTooOld,
+    ModuleTooNew,
     InvalidStructSize,
     RomMismatch,
     GameIdMismatch,
+    CorpusMismatch,
     MissingMandatorySymbols,
     InitFailed
 };
@@ -42,13 +45,23 @@ public:
 
     // Discover and load using standard candidate locations
     LoadStatus load_candidate(const std::filesystem::path& app_dir,
+                              const std::filesystem::path& user_data_dir,
                               const std::filesystem::path& explicit_path,
                               std::string& error_out);
 
-    // Validate module against expected ROM identity and game id
+    // Overload for backwards compatibility
+    LoadStatus load_candidate(const std::filesystem::path& app_dir,
+                              const std::filesystem::path& explicit_path,
+                              std::string& error_out) {
+        return load_candidate(app_dir, {}, explicit_path, error_out);
+    }
+
+    // Validate module against expected ROM identity, game id, and optional corpus digest
     bool validate(uint64_t expected_rom_hash,
                   const char* expected_game_id,
-                  std::string& error_out) const;
+                  std::string& error_out,
+                  uint64_t expected_corpus_digest = 0,
+                  LoadStatus* specific_error = nullptr) const;
 
     // Initialize with engine API
     bool initialize(const SbkEngineApiV1& engine_api, std::string& error_out);
@@ -62,6 +75,7 @@ public:
 
     static std::vector<std::filesystem::path> candidate_paths(
         const std::filesystem::path& app_dir,
+        const std::filesystem::path& user_data_dir = {},
         const std::filesystem::path& explicit_path = {});
 
 private:
