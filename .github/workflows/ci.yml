@@ -30,6 +30,6 @@ jobs:
       - name: Build
         run: cmake --build build-ci --config Release
       - name: ROM-free tests supported on Windows
-        run: ctest --test-dir build-ci -C Release -R "compat_audio_progress|release_artifact_audit" --output-on-failure
+        run: ctest --test-dir build-ci -C Release -E "controller_pak" --output-on-failure
       - name: Diff check
         run: git diff --check
