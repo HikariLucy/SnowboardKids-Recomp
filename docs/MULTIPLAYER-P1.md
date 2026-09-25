@@ -69,6 +69,15 @@ AI finish, results, retry/back to menu, and a training or secondary mode.
 Record the diagnostic log and compare it with `scripts/compat_coverage.py`.
 This is a compact session, not a full-game completion requirement.
 
+Single-player checklist (human observation required):
+
+- [ ] Title and main menu; options and Pak prompt if shown.
+- [ ] Character select and course select; record IDs from COMPAT trace.
+- [ ] Race movement, item spawn/pickup/held/use/effect cleanup.
+- [ ] CPU racers move, recover, finish and receive plausible placement.
+- [ ] Results, retry, return to menu, and training or another real mode.
+- [ ] Image, input, audio and gameplay remain usable through the route.
+
 Multiplayer candidate (hardware required): attach two controllers, assign
 them separately through the existing Controls flow, enter the game's player
 count menu, choose 2P, choose characters and course, start split-screen,
@@ -76,3 +85,12 @@ move each rider independently, use an item, finish, inspect results and
 rematch/exit. Extend the same gate to 3P/4P after code-side and virtual
 fixtures pass. No multiplayer LIVE PASS is claimed until a human completes
 this gate.
+
+Minimum 2P hardware checklist:
+
+- [ ] Two controllers connect and are assigned to distinct players.
+- [ ] The player-count menu accepts 2P; both character choices are independent.
+- [ ] Course choice and split-screen layout appear without HUD distortion.
+- [ ] Both riders move independently and can use an item.
+- [ ] Both finish; results show correct placement; rematch and exit work.
+- [ ] Repeat in Original and Expand. Add 3P/4P after their menu routes pass.
