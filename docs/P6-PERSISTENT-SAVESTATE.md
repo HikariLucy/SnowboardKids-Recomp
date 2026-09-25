@@ -300,7 +300,7 @@ Observed twice before 8312740: a quickload about 2 s after the game threads
 started (boot logos) rolled back with `post-install hash mismatch in depth`
 ("Load failed", previous state intact, no guest side effects).
 
-Status: not reproducible at a1ca18f; open with forensics. There were 0 failures
+Status: not reproducible; open with forensics. At a1ca18f there were 0 failures
 in 9 live attempts:
 
 - F8 at 2 s, 3 s and 6 s after launch, windowed and with the user's fullscreen
@@ -322,6 +322,14 @@ Findings:
   "not ready" gate would reject loads that work today. None was added.
   The remaining candidate is a race that changes or drops the depth target
   between import and post-validation.
+
+At 653831f, two further live cross-process quickloads of the existing
+`quick.sbks` also restored: one requested at the first `live_owners=5`
+heartbeat, the other 2 s after that boundary. Both returned `RESTORE ok`
+without rollback; the restored depth hash was `d3ba22c65d2604e5` in both.
+This does not establish a root cause or close P6-XPROC-02. No readiness gate
+is justified by these observations. The first attempt inside the sandbox did
+not reach guest startup (`pa_write` permission error), so it is not counted.
 
 Forensics: the rollback error now names every diverging domain with both
 hashes (`depth:<snapshot>!=<live>`, `color`, `renderer`). A recurrence shows
