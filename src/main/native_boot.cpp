@@ -499,9 +499,11 @@ void set_rumble(int controller_num, bool on) {
 
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
     if (controller_num == 0) {
+        // A Rumble Pak lets the game's osMotorInit succeed, so its rumble reaches
+        // recompinput::set_rumble. Controller Pak calls stay NOPACK in librecomp.
         return {
             .connected_device = ultramodern::input::Device::Controller,
-            .connected_pak = ultramodern::input::Pak::None,
+            .connected_pak = ultramodern::input::Pak::RumblePak,
         };
     }
 
