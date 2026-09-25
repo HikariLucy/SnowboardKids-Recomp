@@ -21,10 +21,11 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 STAGES = ('controller_pak', 'menu_navigation', 'character_select',
-          'course_select', 'race_active')
+          'course_select', 'interactive_race_scene', 'race_active')
 # Each limit starts when the preceding semantic milestone is observed.
 # The original 18.5s process budget expired during save/rumble prompts.
-STAGE_TIMEOUTS = (10.0, 25.0, 15.0, 15.0, 15.0)
+# Scene initialization and the countdown are separate guest transitions.
+STAGE_TIMEOUTS = (10.0, 25.0, 15.0, 15.0, 15.0, 15.0)
 
 
 def instances(executable):

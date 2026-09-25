@@ -266,6 +266,11 @@ if(SBK_BUILD_NATIVE_BOOT)
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
+    enable_testing()
+    add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
+    target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
+    add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+
     target_compile_options(SnowboardKidsRecompiled PRIVATE
         -fno-strict-aliasing
         -fms-extensions

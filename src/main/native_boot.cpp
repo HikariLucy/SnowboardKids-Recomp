@@ -1,6 +1,7 @@
 #include "config_tabs.hpp"
 #include "virtual_pad.hpp"
 #include "input_ports.hpp"
+#include "audio_progress.hpp"
 #include "quiescence/probe.hpp"
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
@@ -249,7 +250,6 @@ constexpr uint32_t input_channels = 2;
 static uint32_t output_channels = 2;
 constexpr uint32_t duplicated_input_frames = 4;
 static uint32_t discarded_output_frames = 0;
-constexpr uint32_t bytes_per_frame = input_channels * sizeof(float);
 static std::array<float, duplicated_input_frames * input_channels> duplicated_sample_buffer{};
 
 #ifdef SBK_CONTINUATIONS
@@ -481,20 +481,9 @@ size_t get_frames_remaining() {
         return 0;
     }
 
-    uint64_t buffered_byte_count = SDL_GetQueuedAudioSize(audio_device);
-    buffered_byte_count =
-        buffered_byte_count * 2 * sample_rate / output_sample_rate / output_channels;
-
-    constexpr float buffer_offset_frames = 1.0f;
-    const uint32_t frames_per_vi = sample_rate / 60;
-    const uint32_t offset =
-        static_cast<uint32_t>(buffer_offset_frames * bytes_per_frame * frames_per_vi);
-
-    buffered_byte_count = buffered_byte_count > offset
-        ? buffered_byte_count - offset
-        : 0;
-
-    return static_cast<size_t>(buffered_byte_count / bytes_per_frame);
+    return sbk::audio_progress::remaining_frames(
+        SDL_GetQueuedAudioSize(audio_device), output_channels,
+        sample_rate, output_sample_rate);
 }
 
 void set_frequency(uint32_t freq) {
