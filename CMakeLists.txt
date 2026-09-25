@@ -259,6 +259,7 @@ if(SBK_BUILD_NATIVE_BOOT)
 
     add_executable(SnowboardKidsRecompiled
         "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
+        "${CMAKE_SOURCE_DIR}/src/main/virtual_pad.cpp"
         "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"

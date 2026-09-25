@@ -1,4 +1,5 @@
 #include "config_tabs.hpp"
+#include "virtual_pad.hpp"
 #include "quiescence/probe.hpp"
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
@@ -308,6 +309,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
     sbk::quiescence::probe_poll();
+    sbk::virtual_pad::poll();
 #ifdef SBK_CONTINUATIONS
     if (sbk::savestate::driver::enabled()) {
         // Hotkeys are read without consuming SDL events. F5/F8 (no modifier)
@@ -530,6 +532,7 @@ std::string get_game_thread_name(const OSThread* thread) {
 
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     sbk::quiescence::probe_memory(rdram);
+    sbk::virtual_pad::set_memory(rdram);
 #ifdef SBK_CONTINUATIONS
     sbk::savestate::driver::set_memory(rdram);
 #endif
