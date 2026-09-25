@@ -14,6 +14,7 @@ class ArtifactAuditTest(unittest.TestCase):
             archive = Path(directory) / 'test.zip'
             entries = {
                 'SnowboardKidsRecompiled/SnowboardKidsRecompiled': b'ELF safe',
+                'SnowboardKidsRecompiled/BUILD-INFO.txt': b'Project: Snowboard Kids Recompiled\nVersion: 0.1.0\nCommit: e430e84c8bad\nPlatform: linux\nArchitecture: x86_64\n',
                 'SnowboardKidsRecompiled/RUNNING.md': b'Run it',
                 'SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md': b'Notices',
             }
@@ -29,6 +30,16 @@ class ArtifactAuditTest(unittest.TestCase):
 
     def test_clean(self):
         self.check({})
+
+    def test_missing_manifest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / 'test.zip'
+            with zipfile.ZipFile(archive, 'w') as bundle:
+                bundle.writestr('SnowboardKidsRecompiled/SnowboardKidsRecompiled', b'ELF safe')
+                bundle.writestr('SnowboardKidsRecompiled/RUNNING.md', b'Run it')
+                bundle.writestr('SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md', b'Notices')
+            result = audit(archive)
+            self.assertTrue(any('missing build manifest' in error for error in result))
 
     def test_rom_extension_and_header(self):
         self.check({'SnowboardKidsRecompiled/rom.z64': b'X'}, 'forbidden file')

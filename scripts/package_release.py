@@ -26,15 +26,29 @@ def main():
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--library', type=Path, action='append', default=[])
+    parser.add_argument('--version', default='0.1.0', help='Project version')
+    parser.add_argument('--commit', default=None, help='Git commit hash')
+    parser.add_argument('--platform', default=sys.platform if not sys.platform.startswith('linux') else 'linux')
+    parser.add_argument('--architecture', default='x86_64')
     parser.add_argument('--draft', action='store_true',
                         help='Local audit draft while license/source blockers remain; never upload')
     args = parser.parse_args()
     notices = (ROOT / 'THIRD_PARTY_NOTICES.md').read_bytes()
-    if b'RELEASE_BLOCKER' in notices and not args.draft:
-        parser.error('third-party license/source review has RELEASE_BLOCKER entries')
+    if (b'BLOCKER' in notices or b'RELEASE_BLOCKER' in notices) and not args.draft:
+        parser.error('third-party license/source review has blocker entries')
     if not args.binary.is_file() or not args.assets.is_dir():
         parser.error('built executable and theme asset directory are required')
-    files = [('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
+    from generate_version_header import get_git_commit
+    commit = args.commit if args.commit is not None else get_git_commit()
+    manifest = (
+        f"Project: Snowboard Kids Recompiled\n"
+        f"Version: {args.version}\n"
+        f"Commit: {commit}\n"
+        f"Platform: {args.platform}\n"
+        f"Architecture: {args.architecture}\n"
+    ).encode('utf-8')
+    files = [('BUILD-INFO.txt', manifest, False),
+             ('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
              ('THIRD_PARTY_NOTICES.md', notices, False),
              (args.binary.name, args.binary.read_bytes(), True)]
     for path in sorted(args.assets.rglob('*')):
@@ -48,8 +62,14 @@ def main():
         if not library.is_file() or library.is_symlink():
             parser.error(f'invalid shared library: {library}')
         files.append((library.name, library.read_bytes(), False))
-    for name, source in (('N64Recomp', ROOT / '.deps/N64Recomp/LICENSE'),
-                         ('RT64', ROOT / '.deps-renderer/rt64/LICENSE')):
+    license_candidates = [
+        ('N64Recomp', ROOT / '.deps/N64Recomp/LICENSE'),
+        ('RT64', ROOT / '.deps-renderer/rt64/LICENSE'),
+        ('N64ModernRuntime', ROOT / '.deps-runtime/N64ModernRuntime/COPYING'),
+        ('nativefiledialog-extended', ROOT / '.deps-renderer/rt64/src/contrib/nativefiledialog-extended/LICENSE'),
+        ('promptfont', ROOT / '.deps-renderer/recomp-theme/assets/promptfont/LICENSE.txt'),
+    ]
+    for name, source in license_candidates:
         if source.is_file():
             files.append((f'licenses/{name}.txt', source.read_bytes(), False))
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -52,6 +52,8 @@ def audit(archive):
                                   'SnowboardKidsRecompiled/SnowboardKidsRecompiled.exe') for name in names)
         if not executable:
             errors.append('missing executable')
+        if 'SnowboardKidsRecompiled/BUILD-INFO.txt' not in names:
+            errors.append('missing build manifest (BUILD-INFO.txt)')
         if 'SnowboardKidsRecompiled/RUNNING.md' not in names:
             errors.append('missing running guide')
         if 'SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md' not in names:

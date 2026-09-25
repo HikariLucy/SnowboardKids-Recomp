@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 import zipfile
@@ -18,7 +19,7 @@ class PackageTest(unittest.TestCase):
             (assets / 'font.ttf').write_bytes(b'synthetic test font')
             archives = [temp / 'A.zip', temp / 'B.zip']
             for archive in archives:
-                subprocess.run(['python3', str(ROOT / 'scripts/package_release.py'),
+                subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'),
                                 '--binary', str(binary), '--assets', str(assets),
                                 '--out', str(archive), '--draft'], check=True,
                                cwd=temp)
@@ -26,6 +27,7 @@ class PackageTest(unittest.TestCase):
             with zipfile.ZipFile(archives[0]) as bundle:
                 names = set(bundle.namelist())
                 self.assertIn('SnowboardKidsRecompiled/assets/font.ttf', names)
+                self.assertIn('SnowboardKidsRecompiled/BUILD-INFO.txt', names)
                 self.assertNotIn('SnowboardKidsRecompiled/runtime-data', names)
 
     def test_public_package_rejects_license_blocker(self):
@@ -35,7 +37,7 @@ class PackageTest(unittest.TestCase):
             binary.write_bytes(b'synthetic')
             assets = temp / 'assets'
             assets.mkdir()
-            result = subprocess.run(['python3', str(ROOT / 'scripts/package_release.py'),
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'),
                                      '--binary', str(binary), '--assets', str(assets),
                                      '--out', str(temp / 'release.zip')], capture_output=True)
             self.assertNotEqual(result.returncode, 0)
