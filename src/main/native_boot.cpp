@@ -1,3 +1,4 @@
+#include "config_tabs.hpp"
 #include "quiescence/probe.hpp"
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
@@ -107,16 +108,7 @@ void initialize_controls(const std::filesystem::path& runtime_dir) {
     );
 }
 
-void init_frontend_config() {
-    // Minimal standard RecompFrontend configuration for first boot.
-    // Game-specific settings can be added after the native boot path works.
-    recompui::config::GeneralTabOptions general_options{};
-    general_options.has_rumble_strength = true;
-    general_options.has_gyro_sensitivity = false;
-    general_options.has_mouse_sensitivity = false;
-
-    recompui::config::create_general_tab(general_options);
-    recompui::config::create_graphics_tab();
+void apply_resolution_override() {
     if (const char* res_env = std::getenv("SBK_RESOLUTION")) {
         std::string res_str = res_env;
         for (auto& c : res_str) c = std::tolower(c);
@@ -139,9 +131,32 @@ void init_frontend_config() {
         ultramodern::renderer::set_graphics_config(config);
         std::printf("Configured resolution from SBK_RESOLUTION: %s -> enum %d\n", res_env, static_cast<int>(res));
     }
-    recompui::config::create_controls_tab();
-    recompui::config::create_sound_tab();
-    recompui::config::create_mods_tab();
+}
+
+void init_frontend_config(const recomp::GameEntry& game) {
+    // Minimal standard RecompFrontend configuration for first boot.
+    // Game-specific settings can be added after the native boot path works.
+    recompui::config::GeneralTabOptions general_options{};
+    general_options.has_rumble_strength = true;
+    general_options.has_gyro_sensitivity = false;
+    general_options.has_mouse_sensitivity = false;
+
+    for (const auto tab : sbk::frontend::config_tabs(game.mod_game_id)) {
+        switch (tab) {
+            case sbk::frontend::ConfigTab::General: recompui::config::create_general_tab(general_options); break;
+            case sbk::frontend::ConfigTab::Graphics:
+                recompui::config::create_graphics_tab();
+                apply_resolution_override();
+                break;
+            case sbk::frontend::ConfigTab::Controls: recompui::config::create_controls_tab(); break;
+            case sbk::frontend::ConfigTab::Sound: recompui::config::create_sound_tab(); break;
+            case sbk::frontend::ConfigTab::Mods:
+                // ModMenu requires the game mod id before the tab can build it.
+                recompui::update_game_mod_id(game.mod_game_id);
+                recompui::config::create_mods_tab();
+                break;
+        }
+    }
     recompui::config::finalize();
 
     std::puts("RecompFrontend configuration finalized.");
@@ -601,7 +616,7 @@ int main(int argc, char** argv) {
 
     snowboardkids::theme::apply();
     initialize_controls(runtime_dir);
-    init_frontend_config();
+    init_frontend_config(game);
 
     if (!recomp::register_game(game)) {
         std::fprintf(stderr, "Failed to register Snowboard Kids\n");
