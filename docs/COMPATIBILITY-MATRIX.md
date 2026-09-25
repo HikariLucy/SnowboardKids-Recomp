@@ -19,7 +19,7 @@ An untested row is not a pass.
 | --- | --- | --- | --- |
 | Boot, Pak warning, title/demo, main menu | `race/flow/race_flow.c` startup route; `demo/title_demo_race_intro.c`; `menu/main_menu/controller_main_menu_flow.c` | Five live runs reached `controller_pak`, `title_demo_entered`, `menu_navigation` | PASS |
 | Race setup and character selection | `menu/race_setup/race_setup_menu.c`; `menu/character_select/character_select_menu.c` | Five runs reached `character_select`; default one-player route | PASS |
-| Course selection and race start | `menu/course_select/multiplayer_course_select_menu.c`; `race/flow/race_flow.c` | Five runs reached `course_select` and `race_active`; default one-player route | PASS |
+| Course selection and race start | `menu/course_select/multiplayer_course_select_menu.c`; `race/flow/race_flow.c` | Historical five-run gate reached both; current build reached `race_start`, while the extended `race_active` gate is intermittent | LIVE OBSERVED |
 | Ten race courses | `include/generated/course_ids.inc` defines IDs 0–9 | No course-by-course traversal | DISCOVERED |
 | Character roster | `menu/character_select/character_select_menu.c` has six roster IDs (`gCharacterSelectIdOrder`) | Entry observed; no selection-by-character matrix | DISCOVERED |
 | One to four human players | `menu/race_setup/race_setup_menu.c` bounds `gPlayerCount` by `gConnectedControllerCount` | Four isolated virtual ports reached guest; multiplayer menu/race untested | CODE-SIDE COVERED |
@@ -48,7 +48,7 @@ nothing about alternate choices on the same screen.
 | Course select, default route | PASS | `course_select` in five runs |
 | Save/Controller Pak prompts | LIVE OBSERVED | `controller_pak`, `save_select`, `rumble_prompt` in diagnostic run |
 | Secondary menus | DISCOVERED | Mode select, race type, split-screen menus in decomp |
-| Single-player race start | PASS | `race_active` in five runs |
+| Single-player race start | LIVE OBSERVED | Historical five runs reached `race_active`; current extended gate is intermittent |
 | Training | DISCOVERED | `training_course_race_flow.c`; live gate pending |
 | Alternative race/challenge choices | DISCOVERED | Split-screen and race-type dispatch; live gate pending |
 | Results and placement | LIVE OBSERVED | Historical P4-A `race_finish`; current-branch results gate pending |
@@ -168,6 +168,13 @@ arrived at 21.178, 20.760, 20.593, 20.459 and 20.508 s; each run had zero
 fallbacks, timeouts, crashes and residual processes. A separate extended
 navigation gate beyond character selection has shown intermittent progress
 stalls or a race-start timeout; that gate is not part of this baseline claim.
+
+An opt-in `SBK_COMPAT_TRACE=1` run on the current build reached `race_start`
+with course 9 (Rookie Mountain), character 0 (Slash) and one player. The
+coverage tool reported courses 1/10, characters 1/6 and items 0/5. Overlay
+IDs remain UNKNOWN because the current catalog has no stable overlay ID set.
+The same run timed out waiting for `race_active` after `initRaceSceneFlow`;
+there is no current-branch PASS for the complete race-start transition.
 
 The gate pulses logical N64 START through `SBK_P2_CONTROL_FILE`, with a
 release between presses. It confirms the default one-player route. It does
