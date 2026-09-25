@@ -19,9 +19,12 @@ copies available top-level N64Recomp and RT64 license texts.
 | stb | `.deps-renderer/rt64/src/contrib/stb/LICENSE` (MIT / Public Domain) | CLEARED: permissive terms satisfied |
 | Dear ImGui | `.deps-renderer/rt64/src/contrib/imgui/LICENSE.txt` (MIT) | CLEARED: MIT notice preserved |
 | nativefiledialog-extended | `.deps-renderer/rt64/src/contrib/nativefiledialog-extended/LICENSE` (Zlib) | CLEARED: notice included in `licenses/nativefiledialog-extended.txt` |
-| Theme promptfont | `assets/promptfont/LICENSE.txt` (OFL 1.1) | CLEARED: notice bundled with font |
-| Theme fonts (Lato, Fredoka, NotoEmoji) | Unbundled in `assets/` | BLOCKER: OFL Section 2 requires bundled license texts |
-| Theme UI artwork (SVGs, PNGs) | Present in theme assets | BLOCKER: author documentation of distribution rights required |
+| Theme promptfont | `assets/promptfont/LICENSE.txt` (OFL 1.1) | CLEARED: notice bundled with font and in `licenses/` |
+| Theme LatoLatin fonts | `licenses/LatoLatin-OFL.txt` (OFL 1.1, Łukasz Dziedzic) | CLEARED: notice bundled in `licenses/` |
+| Theme Fredoka font | `licenses/Fredoka-OFL.txt` (OFL 1.1, Fredoka Project Authors) | CLEARED: notice bundled in `licenses/` |
+| Theme NotoEmoji font | `licenses/NotoEmoji-OFL.txt` (OFL 1.1, Google Inc.) | CLEARED: notice bundled in `licenses/` |
+| Theme UI navigation icons | `assets/icons/*.svg` in `recomp-theme` | BLOCKER: author documentation of redistribution rights required |
+| Theme decorative assets | `board.svg`, `board-selected.svg`, `rock.png` | NOT SHIPPED: unreferenced by code/RCSS; excluded from distribution package |
 | Game-derived code (CPU corpus, RSP) | Generated from user ROM | BLOCKER: legal distribution status of translated commercial game logic unresolved |
 
 See `docs/LICENSE-AUDIT.md` for complete analysis and component audit.
