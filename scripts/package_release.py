@@ -11,6 +11,7 @@ from audit_release_artifact import audit
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSET_SUFFIXES = {'.png', '.svg', '.ttf', '.rcss', '.txt'}
+EXCLUDED_ASSETS = {'board.svg', 'board-selected.svg', 'rock.png'}
 
 
 def add(bundle, name, data, executable=False):
@@ -39,13 +40,16 @@ def main():
     if not args.binary.is_file() or not args.assets.is_dir():
         parser.error('built executable and theme asset directory are required')
     from generate_version_header import get_git_commit
+    from dependency_lock import compute_lock_digest
     commit = args.commit if args.commit is not None else get_git_commit()
+    lock_digest = compute_lock_digest()
     manifest = (
         f"Project: Snowboard Kids Recompiled\n"
         f"Version: {args.version}\n"
         f"Commit: {commit}\n"
         f"Platform: {args.platform}\n"
         f"Architecture: {args.architecture}\n"
+        f"Dependency-Lock-Digest: {lock_digest}\n"
     ).encode('utf-8')
     files = [('BUILD-INFO.txt', manifest, False),
              ('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
@@ -55,6 +59,8 @@ def main():
         if path.is_symlink():
             parser.error(f'asset symlink refused: {path}')
         if path.is_file():
+            if path.name in EXCLUDED_ASSETS:
+                continue
             if path.suffix.lower() not in ASSET_SUFFIXES:
                 parser.error(f'unreviewed asset type: {path}')
             files.append(('assets/' + path.relative_to(args.assets).as_posix(), path.read_bytes(), False))
@@ -68,6 +74,9 @@ def main():
         ('N64ModernRuntime', ROOT / '.deps-runtime/N64ModernRuntime/COPYING'),
         ('nativefiledialog-extended', ROOT / '.deps-renderer/rt64/src/contrib/nativefiledialog-extended/LICENSE'),
         ('promptfont', ROOT / '.deps-renderer/recomp-theme/assets/promptfont/LICENSE.txt'),
+        ('LatoLatin', ROOT / 'licenses/LatoLatin-OFL.txt'),
+        ('Fredoka', ROOT / 'licenses/Fredoka-OFL.txt'),
+        ('NotoEmoji', ROOT / 'licenses/NotoEmoji-OFL.txt'),
     ]
     for name, source in license_candidates:
         if source.is_file():

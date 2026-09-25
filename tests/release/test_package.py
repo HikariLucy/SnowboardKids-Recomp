@@ -29,6 +29,8 @@ class PackageTest(unittest.TestCase):
                 self.assertIn('SnowboardKidsRecompiled/assets/font.ttf', names)
                 self.assertIn('SnowboardKidsRecompiled/BUILD-INFO.txt', names)
                 self.assertNotIn('SnowboardKidsRecompiled/runtime-data', names)
+                manifest = bundle.read('SnowboardKidsRecompiled/BUILD-INFO.txt').decode('utf-8')
+                self.assertIn('Dependency-Lock-Digest:', manifest)
 
     def test_public_package_rejects_license_blocker(self):
         with tempfile.TemporaryDirectory() as directory:

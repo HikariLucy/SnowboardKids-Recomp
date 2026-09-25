@@ -1,5 +1,7 @@
 """Single source of truth for upstream repositories, commits and patch order."""
 from dataclasses import dataclass
+import hashlib
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -32,3 +34,24 @@ DEPENDENCIES = {
         'https://github.com/cdlewis/snowboardkids-recomp-theme.git',
         '0cb9a83a263607fbc8ab6176a758a00726e237cc'),
 }
+
+
+def compute_lock_digest() -> str:
+    hasher = hashlib.sha256()
+    for name in sorted(DEPENDENCIES.keys()):
+        dep = DEPENDENCIES[name]
+        hasher.update(f"{name}:{dep.url}:{dep.commit}\n".encode("utf-8"))
+    return hasher.hexdigest()
+
+
+def compute_patch_digest(root: Path | None = None) -> str:
+    if root is None:
+        root = Path(__file__).resolve().parents[1]
+    hasher = hashlib.sha256()
+    for name in sorted(DEPENDENCIES.keys()):
+        dep = DEPENDENCIES[name]
+        for p in dep.patches:
+            patch_file = root / "patches" / p
+            if patch_file.is_file():
+                hasher.update(f"{p}:{hashlib.sha256(patch_file.read_bytes()).hexdigest()}\n".encode("utf-8"))
+    return hasher.hexdigest()
