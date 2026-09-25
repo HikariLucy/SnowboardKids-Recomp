@@ -21,6 +21,9 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 STAGES = ('controller_pak', 'menu_navigation', 'character_select',
           'course_select', 'race_active')
+# Each limit starts when the preceding semantic milestone is observed.
+# The original 18.5s process budget expired during save/rumble prompts.
+STAGE_TIMEOUTS = (10.0, 25.0, 15.0, 15.0, 15.0)
 
 
 def instances(executable):
@@ -85,8 +88,8 @@ def run(build, executable):
         env = os.environ.copy()
         env.update(SBK_CONTINUATIONS='ON', SBK_P2_CYCLES='0', SBK_RESOLUTION='original',
                    SBK_P2_CONTROL_FILE=str(control), SBK_P4A_LIVE_NAVIGATION='1')
-        # Reserve one and a half seconds of the 20-second budget for group cleanup.
-        deadline = time.monotonic() + 18.5
+        started = time.monotonic()
+        deadline = started + STAGE_TIMEOUTS[0]
         with log_path.open('w') as log, selectors.DefaultSelector() as selector:
             process = subprocess.Popen(
                 [str(executable), str(build / 'runtime-data/snowboardkids.n64.us.z64')],
@@ -99,7 +102,7 @@ def run(build, executable):
                 while not done:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0 or not selector.select(remaining):
-                        errors.append('20s budget exhausted before interactive race')
+                        errors.append(f'timeout waiting for {STAGES[len(seen)]}')
                         break
                     chunk = os.read(process.stdout.fileno(), 65536)
                     if not chunk:
@@ -128,6 +131,9 @@ def run(build, executable):
                                     errors.append(f'out-of-order milestone: {stage}')
                                 else:
                                     seen.append(stage)
+                                    print(f'{stage}: {time.monotonic() - started:.3f}s', flush=True)
+                                    if len(seen) < len(STAGES):
+                                        deadline = time.monotonic() + STAGE_TIMEOUTS[len(seen)]
                             # demo_race_players is diagnostic only, never a gate.
                         tick = re.search(r'P4A input_frame=(\d+)', line)
                         if tick and demo:
