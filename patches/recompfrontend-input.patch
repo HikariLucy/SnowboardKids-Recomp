@@ -1,0 +1,83 @@
+diff --git a/recompinput/src/input_state.cpp b/recompinput/src/input_state.cpp
+index 041c67b..0dedc85 100644
+--- a/recompinput/src/input_state.cpp
++++ b/recompinput/src/input_state.cpp
+@@ -6,6 +6,7 @@
+ #include "recompinput/recompinput.h"
+ #include "recompinput/input_state.h"
+ #include "recompinput/input_binding.h"
++#include "recompinput/deadzone.h"
+ #include "recompinput/players.h"
+ #include "recompui/config.h"
+ 
+@@ -314,38 +315,8 @@ void recompinput::get_mouse_deltas(float* x, float* y) {
+ }
+ 
+ void recompinput::apply_joystick_deadzone(float x_in, float y_in, float* x_out, float* y_out) {
+-    float joystick_deadzone = (float)recompui::config::general::get_joystick_deadzone() / 100.0f;
+-
+-    if (fabsf(x_in) < joystick_deadzone) {
+-        x_in = 0.0f;
+-    }
+-    else {
+-        if (x_in > 0.0f) {
+-            x_in -= joystick_deadzone;
+-        }
+-        else {
+-            x_in += joystick_deadzone;
+-        }
+-
+-        x_in /= (1.0f - joystick_deadzone);
+-    }
+-
+-    if (fabsf(y_in) < joystick_deadzone) {
+-        y_in = 0.0f;
+-    }
+-    else {
+-        if (y_in > 0.0f) {
+-            y_in -= joystick_deadzone;
+-        }
+-        else {
+-            y_in += joystick_deadzone;
+-        }
+-
+-        y_in /= (1.0f - joystick_deadzone);
+-    }
+-
+-    *x_out = x_in;
+-    *y_out = y_in;
++    const float joystick_deadzone = (float)recompui::config::general::get_joystick_deadzone() / 100.0f;
++    radial_deadzone(x_in, y_in, joystick_deadzone, x_out, y_out);
+ }
+ 
+ void recompinput::get_right_analog(int controller_num, float* x, float* y) {
+diff --git a/recompinput/include/recompinput/deadzone.h b/recompinput/include/recompinput/deadzone.h
+new file mode 100644
+index 0000000..61406ce
+--- /dev/null
++++ b/recompinput/include/recompinput/deadzone.h
+@@ -0,0 +1,24 @@
++#pragma once
++
++#include <algorithm>
++#include <cmath>
++
++namespace recompinput {
++    // Radial deadzone for a stick in [-1, 1] per axis. Inside the deadzone the stick is neutral;
++    // outside it the magnitude is rescaled from [deadzone, 1] to [0, 1] and the direction is kept,
++    // so diagonals stay diagonal and partial deflection stays proportional. The result never
++    // leaves the unit circle, even for a square-gated stick reporting (1, 1).
++    inline void radial_deadzone(float x_in, float y_in, float deadzone, float* x_out, float* y_out) {
++        deadzone = std::clamp(deadzone, 0.0f, 0.95f);
++        const float magnitude = std::sqrt(x_in * x_in + y_in * y_in);
++        if (!(magnitude > deadzone)) { // also rejects NaN
++            *x_out = 0.0f;
++            *y_out = 0.0f;
++            return;
++        }
++
++        const float scaled = (std::min(magnitude, 1.0f) - deadzone) / (1.0f - deadzone);
++        *x_out = x_in * (scaled / magnitude);
++        *y_out = y_in * (scaled / magnitude);
++    }
++}

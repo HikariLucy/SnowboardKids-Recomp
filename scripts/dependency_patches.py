@@ -30,7 +30,8 @@ SERIES = {
     'frontend': ('.deps-renderer/RecompFrontend',
                  'e85b912d9df677b04f9358867dd010c8af27ea05', (
                      'recompfrontend-resolution.patch',
-                     'recompfrontend-quiescence.patch',)),
+                     'recompfrontend-quiescence.patch',
+                     'recompfrontend-input.patch')),
 }
 
 
