@@ -2,6 +2,7 @@
 #include "quiescence/quiescence.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <exception>
 
 namespace sbk::savestate {
@@ -168,7 +169,16 @@ bool SnapshotService::install_timeline(const InMemorySnapshot& snapshot, FaultPo
     }
     const auto mismatch = first_mismatch(snapshot.hashes, live.hashes, snapshot.present);
     if (mismatch != DomainId::Count) {
+        // P6-XPROC-02 forensics: every diverging domain with snapshot!=live hashes.
         error = std::string("post-install hash mismatch in ") + domain_name(mismatch);
+        for (size_t i = 0; i < size_t(DomainId::Count); ++i) {
+            const auto id = static_cast<DomainId>(i);
+            if (!(snapshot.present & domain_bit(id)) || snapshot.hashes.domain[i] == live.hashes.domain[i]) continue;
+            char buf[64];
+            std::snprintf(buf, sizeof(buf), " %s:%016llx!=%016llx", domain_name(id),
+                (unsigned long long)snapshot.hashes.domain[i], (unsigned long long)live.hashes.domain[i]);
+            error += buf;
+        }
         return false;
     }
     result.phases.push_back({"post-validate", micros_since(start)});

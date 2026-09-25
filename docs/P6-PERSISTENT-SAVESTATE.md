@@ -294,9 +294,40 @@ Coverage: `python3 tests/renderer_lifecycle/run.py` (no GPU; real
 `RT64::SharedQueueResources` and the production reset; fails on the old reset)
 and `python3 tests/renderer_lifecycle/run_live.py` (ROM + GPU).
 
-Separate, not fixed here: a quickload during the boot logos, before the game
-created its race-size targets, rolls back with
-`post-install hash mismatch in depth` ("Load failed", state intact).
+### P6-XPROC-02: early quickload rolled back with a depth mismatch
+
+Observed twice before 8312740: a quickload about 2 s after the game threads
+started (boot logos) rolled back with `post-install hash mismatch in depth`
+("Load failed", previous state intact, no guest side effects).
+
+Status: not reproducible at a1ca18f; open with forensics. There were 0 failures
+in 9 live attempts:
+
+- F8 at 2 s, 3 s and 6 s after launch, windowed and with the user's fullscreen
+  configuration.
+- The exact original save file and timing (2 s after `live_owners=5`).
+- Builds with the pre-8312740 presentation reset, and without
+  `rt64-aspect-coverage.patch`.
+
+Findings:
+
+- The signature needs the post-install depth plane to differ from the
+  GPU-authoritative plane that was just installed. Forcing the restoring
+  process to export depth from RDRAM (as when no RT64 depth target exists)
+  reproduces it deterministically: rollback, state intact, twice in a row.
+- The reverse direction is not the cause. A save whose depth plane came from
+  RDRAM (captured before any depth target existed) loads exactly: the
+  RDRAM->GPU->readback round trip is byte-exact.
+- So a quickload in startup is not inherently unrestorable, and a
+  "not ready" gate would reject loads that work today. None was added.
+  The remaining candidate is a race that changes or drops the depth target
+  between import and post-validation.
+
+Forensics: the rollback error now names every diverging domain with both
+hashes (`depth:<snapshot>!=<live>`, `color`, `renderer`). A recurrence shows
+whether only the plane content differs (renderer header equal) or the target
+layout changed too. Covered by the savestate runtime test (a domain that
+installs one byte wrong must roll back exactly and be named).
 
 ## Tests (non-live, measured)
 

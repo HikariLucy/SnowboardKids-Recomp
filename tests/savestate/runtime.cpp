@@ -812,6 +812,42 @@ int main(int argc, char** argv) {
         std::printf("  fixture save_us %s load_us %s restore_us %s\n", save_us.line().c_str(), load_us.line().c_str(), restore_file_us.line().c_str());
     }
 
+    // ---- P6-XPROC-02 forensics: a domain that installs differently is named with both hashes ----
+    {
+        struct Plane final : s::Domain { // stands in for a GPU plane read back differently
+            std::vector<uint8_t> live = std::vector<uint8_t>(0x1000, 0x5A);
+            int diverge = 0; // installs that come out wrong (the rollback install stays faithful)
+            s::DomainId id() const override { return s::DomainId::Rsp; }
+            bool capture(s::InMemorySnapshot& out, std::string&) override { out.rsp.dmem = live; return true; }
+            bool install(const s::InMemorySnapshot& in, std::string&) override {
+                live = in.rsp.dmem;
+                if (diverge > 0 && diverge--) live[7] ^= 1;
+                return true;
+            }
+        } plane;
+        s::SnapshotService forensic;
+        for (s::Domain* d : std::initializer_list<s::Domain*>{&memory, &continuations, &scheduler, &time, &audio, &input, &plane})
+            forensic.add(d);
+        forensic.set_build({0xC0FFEEull, 7, 61});
+        gen = freeze();
+        s::InMemorySnapshot saved, before;
+        CHECK(forensic.capture(gen, saved).ok);
+        plane.live.assign(0x1000, 0xA5); // the live timeline moves on
+        CHECK(forensic.capture(gen, before).ok);
+        plane.diverge = 1;
+        auto r = forensic.restore(gen, saved);
+        char expect[64];
+        std::snprintf(expect, sizeof(expect), "rsp:%016llx!=", (unsigned long long)saved.hashes.domain[size_t(s::DomainId::Rsp)]);
+        CHECK(!r.ok && r.rolled_back && !r.unrecoverable);
+        CHECK(r.error.rfind("post-install hash mismatch in rsp", 0) == 0 && r.error.find(expect) != std::string::npos);
+        CHECK(r.hashes == before.hashes && plane.live == std::vector<uint8_t>(0x1000, 0xA5)); // rollback exact
+        CHECK(forensic.restore(gen, saved).ok); // the same snapshot installs once the plane is faithful
+        thaw(gen);
+        advance(20);
+        CHECK(word(ERROR_FLAG) == 0);
+        std::printf("post-install divergence rolled back and named: %s\n", r.error.c_str());
+    }
+
     // ---- Unrecoverable path (last: leaves the barrier sealed in Restore) ----
     gen = freeze();
     auto fatal = service.restore(gen, snap, s::FaultPoint::DuringRollback);
