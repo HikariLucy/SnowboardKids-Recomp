@@ -33,7 +33,8 @@ struct Config {
     std::string writer = "SnowboardKidsRecompiled";
 };
 
-// Before runtime workers start. Enables the P2 coordinator.
+// Before the first device producer (frontend config load included).
+// Enables the P2 coordinator.
 bool init(const Config& config);
 bool enabled();
 void set_memory(uint8_t* rdram);

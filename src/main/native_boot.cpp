@@ -567,11 +567,41 @@ int main(int argc, char** argv) {
     recompui::programconfig::set_program_name("Snowboard Kids: Recompiled");
     recompui::programconfig::set_program_id(u8"snowboardkids-recompiled");
     recomp::register_config_path(runtime_dir);
+    const recomp::GameEntry& game = supported_games[0];
+
+#ifdef SBK_CONTINUATIONS
+    // Savestates. This arms the P2 coordinator, so it must run before the first
+    // device producer: init_frontend_config() below already queues a renderer
+    // UpdateConfigAction, and work admitted while P2 is disabled is never
+    // counted (LIVE-STARTUP-01). SBK_SAVESTATES=0 disables them; the P2 probe
+    // (SBK_P2_CYCLES) owns the barrier exclusively when set.
+    if (const char* flag = std::getenv("SBK_SAVESTATES"); flag && std::strcmp(flag, "0") == 0) {
+        std::fprintf(stderr, "SAVESTATE disabled by SBK_SAVESTATES=0\n");
+    } else if (std::getenv("SBK_P2_CYCLES")) {
+        std::fprintf(stderr, "SAVESTATE disabled: SBK_P2_CYCLES probe already drives the barrier\n");
+    } else {
+        // Snapshots restore only into the same generated corpus/manifest.
+        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
+        uint64_t digest = 14695981039346656037ull;
+        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
+        sbk::savestate::driver::Config config{};
+        config.build = {digest, 1981, 56};
+        config.rom_hash = game.rom_hash; // select_rom() below verifies the ROM against this XXH3-64
+        config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
+        config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
+        config.directory = recomp::get_config_path() / "savestates";
+        config.notify = [](sbk::savestate::driver::Notice notice) {
+            sbk::savestate::toast::show(sbk::savestate::driver::notice_text(notice),
+                sbk::savestate::driver::notice_is_error(notice));
+        };
+        sbk::savestate::driver::init(config);
+        sbk::savestate::dev::init();
+    }
+#endif
+
     snowboardkids::theme::apply();
     initialize_controls(runtime_dir);
     init_frontend_config();
-
-    const recomp::GameEntry& game = supported_games[0];
 
     if (!recomp::register_game(game)) {
         std::fprintf(stderr, "Failed to register Snowboard Kids\n");
@@ -587,33 +617,6 @@ int main(int argc, char** argv) {
     }
 
     sbk::register_overlays();
-
-#ifdef SBK_CONTINUATIONS
-    // Savestates (before runtime workers start). SBK_SAVESTATES=0 disables them;
-    // the P2 probe (SBK_P2_CYCLES) owns the barrier exclusively when set.
-    if (const char* flag = std::getenv("SBK_SAVESTATES"); flag && std::strcmp(flag, "0") == 0) {
-        std::fprintf(stderr, "SAVESTATE disabled by SBK_SAVESTATES=0\n");
-    } else if (std::getenv("SBK_P2_CYCLES")) {
-        std::fprintf(stderr, "SAVESTATE disabled: SBK_P2_CYCLES probe already drives the barrier\n");
-    } else {
-        // Snapshots restore only into the same generated corpus/manifest.
-        constexpr const char* corpus = "76260cb8f0e080d7dc7f0e5d0ad3ac7d355de81d98acf4ce2a9a23132cd1ae43";
-        uint64_t digest = 14695981039346656037ull;
-        for (const char* c = corpus; *c; ++c) { digest ^= static_cast<unsigned char>(*c); digest *= 1099511628211ull; }
-        sbk::savestate::driver::Config config{};
-        config.build = {digest, 1981, 56};
-        config.rom_hash = game.rom_hash; // select_rom() verified the ROM against this XXH3-64
-        config.audio = {capture_host_audio, install_host_audio, validate_host_audio};
-        config.audio_pause = [](bool paused) { if (audio_device) SDL_PauseAudioDevice(audio_device, paused ? 1 : 0); };
-        config.directory = recomp::get_config_path() / "savestates";
-        config.notify = [](sbk::savestate::driver::Notice notice) {
-            sbk::savestate::toast::show(sbk::savestate::driver::notice_text(notice),
-                sbk::savestate::driver::notice_is_error(notice));
-        };
-        sbk::savestate::driver::init(config);
-        sbk::savestate::dev::init();
-    }
-#endif
 
     recomp::rsp::callbacks_t rsp_callbacks{
         .get_rsp_microcode = get_rsp_microcode,

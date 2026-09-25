@@ -11,6 +11,9 @@ namespace sbk::quiescence {
 namespace {
 using Clock = std::chrono::high_resolution_clock;
 std::atomic_bool on{false};
+// Device work admitted while disabled is never counted, so its completion would
+// be unmatched once enabled. enable() refuses to arm after any such work.
+std::atomic<uint64_t> unaccounted{0};
 std::mutex mutex;
 std::condition_variable changed;
 State state = State::Idle;
@@ -83,7 +86,11 @@ const char* name(State s) {
     constexpr const char* names[]{"Idle", "Requested", "ParkGame", "CloseVI", "DrainDevices", "Frozen", "Resume", "Capture", "Restore"};
     return names[static_cast<unsigned>(s)];
 }
-void enable() { on = true; }
+void enable() {
+    if (on) return;
+    if (unaccounted.load()) throw std::logic_error("P2 enabled after unaccounted device work");
+    on = true;
+}
 bool enabled() { return on.load(std::memory_order_relaxed); }
 void ready() { std::lock_guard lock(mutex); runtime_ready = true; }
 static ultramodern::renderer::RendererContext* global_renderer_context = nullptr;
@@ -257,14 +264,14 @@ void timer_boundary(size_t count) {
     if (busy()) park_wait(lock);
 }
 bool try_accept_config() {
-    if (!enabled()) return true;
+    if (!enabled()) { ++unaccounted; return true; }
     std::lock_guard lock(mutex);
     if (state != State::Idle) return false;
     record("graphics", "config-accepted", ++pending[1]);
     return true;
 }
 void accepted(Device device) {
-    if (!enabled()) return;
+    if (!enabled()) { ++unaccounted; return; }
     std::lock_guard lock(mutex);
     if (state == State::Frozen || state == State::DrainDevices ||
         state == State::Capture || state == State::Restore)

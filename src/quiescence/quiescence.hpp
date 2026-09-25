@@ -31,7 +31,10 @@ struct Trace {
     std::string participant, operation;
     uint64_t detail;
 };
-// Enable before starting workers. Disabled by default; request requires ready().
+// Enable before the first device producer (workers, and frontend config load,
+// which queues a renderer action). Disabled by default; request requires
+// ready(). Throws if device work was already admitted while disabled: that
+// work was never counted and its completion would be unmatched.
 void enable();
 bool enabled();
 void ready();

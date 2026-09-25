@@ -11,7 +11,7 @@ compiler = os.environ.get('CXX', 'c++')
 with tempfile.TemporaryDirectory(prefix='sbk-p2-tests-') as directory:
     common = [compiler, '-std=c++20', '-pthread', '-Wall', '-Wextra', '-I' + str(ROOT / 'src')]
     coordinator = ROOT / 'src/quiescence/quiescence.cpp'
-    for name in ['main', 'kernel']:
+    for name in ['main', 'kernel', 'lifecycle']:
         command = common + [str(ROOT / f'tests/quiescence/{name}.cpp'), str(coordinator)]
         if name == 'kernel':
             command += ['-Wno-unused-parameter', '-Wno-missing-field-initializers']
@@ -24,3 +24,5 @@ with tempfile.TemporaryDirectory(prefix='sbk-p2-tests-') as directory:
         subprocess.run([str(executable)], check=True, timeout=60)
         if name == 'kernel':
             subprocess.run([str(executable), '--baseline'], check=True, timeout=60)
+        if name == 'lifecycle':
+            subprocess.run([str(executable), '--late-enable'], check=True, timeout=60)

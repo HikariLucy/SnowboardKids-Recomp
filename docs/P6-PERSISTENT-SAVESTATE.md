@@ -224,6 +224,37 @@ rename); the fix matters for a clean exit. **Status: fixed code-side; not
 reproducible without the live game, so confirmation is part of the live gate
 (close the game, check that no crash backtrace is printed).**
 
+## LIVE-STARTUP-01
+
+Symptom: every launch aborted before gameplay (heartbeat ~720–1080, no guest
+owner yet) with `P2 unmatched completion` thrown by
+`quiescence::completed(Graphics)` on the gfx thread.
+
+Root cause (bisected live: f91fb36/5102039 start, d6298fe/d177aa7 abort; first
+bad commit d6298fe): `driver::init` — which arms P2 — moved after
+`select_rom()` for `rom_hash`, and so after `init_frontend_config()`. That
+creates the graphics tab, whose `set_graphics_config` queues an
+`UpdateConfigAction` through `trigger_config_action`. P2 was still disabled, so
+`try_accept_config` did not count it; the gfx thread's first dequeue then
+completed it with P2 armed and `pending[Graphics] == 0`. Instrumented run:
+1 config admitted while disabled, 0 graphics accepted, first completion at
+generation 0 / Idle. Not a race and not a double completion.
+
+Fix: savestates are initialized (P2 armed) before the first device producer —
+before theme/controls/frontend config and ROM selection (`rom_hash` is static
+game metadata). `enable()` now refuses to arm, with
+`P2 enabled after unaccounted device work`, if any graphics/RSP work was
+admitted while disabled, so a future ordering regression fails at enable time
+instead of at a random completion. `completed()` is unchanged.
+
+Regression coverage: `tests/quiescence/lifecycle.cpp` (in `run.py` and CTest)
+— 50 armed startups with config/VI work queued before the graphics worker
+starts, all matched; an invalid Graphics/RSP completion after the activation
+boundary still throws; `--late-enable` reproduces the old order and checks the
+coordinator refuses to arm. Live: 3/3 startups past the old abort point into
+gameplay (startup retired, 6 owners, no backtrace). P6/P7 persistent live
+remain pending (below).
+
 ## Tests (non-live, measured)
 
 `python3 tests/savestate/run.py` (also `--sanitize`, `--tsan`):

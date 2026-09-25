@@ -341,6 +341,13 @@ if(SBK_BUILD_QUIESCENCE_TESTS)
     target_include_directories(SnowboardKidsQuiescenceTest PRIVATE src)
     add_test(NAME runtime_quiescence COMMAND SnowboardKidsQuiescenceTest)
     set_tests_properties(runtime_quiescence PROPERTIES TIMEOUT 60)
+    add_executable(SnowboardKidsQuiescenceLifecycleTest
+        tests/quiescence/lifecycle.cpp src/quiescence/quiescence.cpp)
+    target_link_libraries(SnowboardKidsQuiescenceLifecycleTest PRIVATE Threads::Threads)
+    target_include_directories(SnowboardKidsQuiescenceLifecycleTest PRIVATE src)
+    add_test(NAME runtime_quiescence_lifecycle COMMAND SnowboardKidsQuiescenceLifecycleTest)
+    add_test(NAME runtime_quiescence_lifecycle_late COMMAND SnowboardKidsQuiescenceLifecycleTest --late-enable)
+    set_tests_properties(runtime_quiescence_lifecycle runtime_quiescence_lifecycle_late PROPERTIES TIMEOUT 60)
     add_executable(SnowboardKidsQuiescenceKernelTest
         tests/quiescence/kernel.cpp src/quiescence/quiescence.cpp
         "${N64_RUNTIME_DIR}/ultramodern/src/threads.cpp"
