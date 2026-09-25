@@ -1,7 +1,9 @@
 #pragma once
 #include "dispatch.hpp"
 #include <cfenv>
+#include <cstddef>
 namespace sbk::continuation {
+void set_player_count_request_callback(void (*callback)(size_t));
 enum class BlockedPhase : uint8_t { None, Begin, Waiting, Committed };
 struct BlockedOperation {
     uint64_t hle_id = 0;

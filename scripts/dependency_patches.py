@@ -19,7 +19,8 @@ SERIES = {
                     'n64modernruntime-quiescence.patch',
                     'n64modernruntime-continuations.patch',
                     'n64modernruntime-savestate.patch',
-                    'n64modernruntime-shutdown.patch')),
+                    'n64modernruntime-shutdown.patch',
+                    'n64modernruntime-input-neutral.patch')),
     'recomp': ('.deps/N64Recomp',
                'ffb39cdad1da5de07eaaa48bd1db4a89a7986771', (
                    'n64recomp-continuations.patch',)),

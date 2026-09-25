@@ -1,5 +1,6 @@
 #include "config_tabs.hpp"
 #include "virtual_pad.hpp"
+#include "input_ports.hpp"
 #include "quiescence/probe.hpp"
 #ifdef SBK_CONTINUATIONS
 #include "continuation/execution.hpp"
@@ -10,6 +11,7 @@
 #include "savestate/toast.hpp"
 #endif
 #include <algorithm>
+#include <atomic>
 #include <array>
 #include <cinttypes>
 #include <csignal>
@@ -32,6 +34,7 @@
 #include "librecomp/rsp.hpp"
 #include "recompinput/input_events.h"
 #include "recompinput/input_state.h"
+#include "recompinput/players.h"
 #include "recompinput/profiles.h"
 #include "recompui/config.h"
 #include "recompui/renderer.h"
@@ -54,6 +57,40 @@ void traced_entrypoint(uint8_t* rdram, recomp_context* ctx);
 // RecompFrontend expects these program-owned globals.
 // Keep their names and linkage identical to the working frontend contract.
 SDL_Window* window = nullptr;
+
+// Published by the SDL/frontend thread; consumed by the guest input callbacks.
+// Port zero remains keyboard-capable during the single-player setup flow.
+static std::atomic<uint8_t> connected_port_mask{1};
+static std::atomic<bool> single_player_input{true};
+
+static void publish_controller_ports() {
+    int controller_count = 0;
+    for (int i = 0; i < SDL_NumJoysticks(); ++i) {
+        if (SDL_IsGameController(i)) ++controller_count;
+    }
+    const bool single = recompinput::players::is_single_player_mode();
+    uint8_t assigned_attached = 0;
+    if (!single) {
+        for (int port = 0; port < 4; ++port) {
+            if (!recompinput::players::get_player_is_assigned(port)) continue;
+            const auto& player = recompinput::players::get_player(port);
+            if (player.keyboard_enabled ||
+                (player.controller && SDL_GameControllerGetAttached(player.controller))) {
+                assigned_attached |= uint8_t(1u << port);
+            }
+        }
+    }
+    single_player_input.store(single, std::memory_order_release);
+    const uint8_t mask = sbk::input_ports::presence_mask(single, controller_count, assigned_attached);
+    if (std::getenv("SBK_TEST_MULTI_PAD_FILE")) {
+        static uint8_t last_mask = 0xff;
+        if (mask != last_mask) {
+            std::fprintf(stderr, "VMULTI ports mask=%02x single=%d\n", mask, int(single));
+            last_mask = mask;
+        }
+    }
+    connected_port_mask.store(mask, std::memory_order_release);
+}
 
 std::vector<recomp::GameEntry> supported_games = {
     {
@@ -310,6 +347,7 @@ void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
     sbk::quiescence::probe_poll();
     sbk::virtual_pad::poll();
+    publish_controller_ports();
 #ifdef SBK_CONTINUATIONS
     if (sbk::savestate::driver::enabled()) {
         // Hotkeys are read without consuming SDL events. F5/F8 (no modifier)
@@ -492,6 +530,18 @@ bool get_input(int controller_num, uint16_t* buttons, float* x, float* y) {
         return false;
     }
 
+    *buttons = 0;
+    *x = 0.0f;
+    *y = 0.0f;
+    if (!(connected_port_mask.load(std::memory_order_acquire) & (1u << controller_num))) {
+        return false;
+    }
+    // Provisional setup ports let the guest offer 2–4 players. They remain
+    // neutral until RecompInput's assignment flow maps distinct devices.
+    if (single_player_input.load(std::memory_order_acquire) && controller_num != 0) {
+        return true;
+    }
+
     return recompinput::profiles::get_n64_input(controller_num, buttons, x, y);
 }
 
@@ -500,7 +550,8 @@ void set_rumble(int controller_num, bool on) {
 }
 
 ultramodern::input::connected_device_info_t get_connected_device_info(int controller_num) {
-    if (controller_num == 0) {
+    if (controller_num >= 0 && controller_num < 4 &&
+        (connected_port_mask.load(std::memory_order_acquire) & (1u << controller_num))) {
         // A Rumble Pak lets the game's osMotorInit succeed, so its rumble reaches
         // recompinput::set_rumble. Controller Pak calls stay NOPACK in librecomp.
         return {
@@ -534,6 +585,8 @@ void traced_entrypoint(uint8_t* rdram, recomp_context* ctx) {
     sbk::quiescence::probe_memory(rdram);
     sbk::virtual_pad::set_memory(rdram);
 #ifdef SBK_CONTINUATIONS
+    sbk::continuation::set_player_count_request_callback(
+        recompinput::players::request_game_player_count);
     sbk::savestate::driver::set_memory(rdram);
 #endif
     std::puts(">>> ENTERING SNOWBOARD KIDS RECOMP_ENTRYPOINT");

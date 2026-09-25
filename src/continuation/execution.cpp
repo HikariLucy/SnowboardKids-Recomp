@@ -1,6 +1,7 @@
 #include "execution.hpp"
 #include "hle.hpp"
 #include "runtime_owner.hpp"
+#include "compat/coverage.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "quiescence/quiescence.hpp"
 #include <cstdio>
@@ -15,6 +16,7 @@ thread_local bool dispatching = false;
 std::unique_ptr<Execution> startup;
 bool startup_retired = false;
 std::atomic<uint64_t> g_total_dispatches{0};
+std::atomic<void (*)(size_t)> g_player_count_callback{nullptr};
 std::atomic<unsigned> reached_milestones{0};
 enum Milestone : unsigned {
     Pak = 1, Menu = 2, Character = 4, Course = 8, Active = 16,
@@ -66,6 +68,10 @@ bool startup_is_retired() {
     return startup_retired;
 }
 
+void set_player_count_request_callback(void (*callback)(size_t)) {
+    g_player_count_callback.store(callback, std::memory_order_release);
+}
+
 void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
     if(dispatching) throw std::runtime_error("Native generated reentry is forbidden");
     struct DispatchScope { DispatchScope(){dispatching=true;} ~DispatchScope(){dispatching=false;} } scope;
@@ -103,14 +109,58 @@ void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
             }
         }
         if(action.kind==ActionKind::Call) {
+            const char* name = descriptor(action.target).name;
+            if (name && !std::strcmp(name, "updateRaceSetupPlayerCountMenu")) {
+                // This callback runs only in the real player-count menu, not
+                // in the four-player title demo. RecompInput applies the
+                // request on its frontend thread and owns the assignment UI.
+                static int requested_players = 0;
+                const int players = rdram[(0x80121B55u - 0x80000000u) ^ 3u];
+                if (players >= 1 && players <= 4 && players != requested_players) {
+                    if (auto callback = g_player_count_callback.load(std::memory_order_acquire)) {
+                        callback(size_t(players));
+                    }
+                    requested_players = players;
+                }
+            }
             // Manual telemetry never installs an input override.
             static const bool live_navigation = std::getenv("SBK_P4A_LIVE_NAVIGATION") != nullptr;
             static const bool manual = std::getenv("SBK_P4A_MANUAL") != nullptr;
-            if (live_navigation || manual) {
+            static const bool compat_trace = std::getenv("SBK_COMPAT_TRACE") != nullptr;
+            if (live_navigation || manual || compat_trace) {
                 static uint64_t input_frame = 0;
                 // Current interactive path, separate from the cumulative report.
                 static unsigned path = 0;
-                const char* name = descriptor(action.target).name;
+                if (compat_trace && name &&
+                    (!std::strncmp(name, "init", 4) ||
+                     !std::strcmp(name, "updateRaceGameplayFlow") ||
+                     !std::strcmp(name, "waitRaceFinishResultsFlow"))) {
+                    // USA guest symbols from the matching decomp map. Big-endian
+                    // byte access follows the runtime's word-swapped RDRAM.
+                    auto guest_byte = [rdram](uint32_t address) {
+                        return rdram[(address - 0x80000000u) ^ 3u];
+                    };
+                    const int course = int(int16_t((guest_byte(0x80121B50u) << 8) |
+                                                  guest_byte(0x80121B51u)));
+                    sbk::compat::Snapshot snapshot{
+                        int(guest_byte(0x800EC9C2u)), // gRaceSplitscreenMode
+                        course,
+                        int(guest_byte(0x80121D85u)), // gRacePlayers[0].selectedCharacterId
+                        int(guest_byte(0x80121B55u)), // gPlayerCount
+                        int(guest_byte(0x80122292u)), // gRacePlayers[0].itemEffectType
+                        int(guest_byte(0x80121B5Fu)), // gRaceResultState
+                        int(guest_byte(0x8010ADF9u))  // gHighestUnlockedCourse
+                    };
+                    static sbk::compat::Coverage coverage;
+                    if (auto event = coverage.observe(name, snapshot)) {
+                        std::fprintf(stderr,
+                            "COMPAT %s mode=%d course=%d character=%d players=%d item=%d results=%d progression=%d\n",
+                            event->name, snapshot.mode, snapshot.course,
+                            snapshot.character, snapshot.players, snapshot.item,
+                            snapshot.results, snapshot.progression);
+                    }
+                }
+                if (live_navigation || manual) {
                 auto mark = [&](unsigned bit, const char* milestone) {
                     if (!(reached_milestones.fetch_or(bit, std::memory_order_relaxed) & bit)) {
                         std::fprintf(stderr, "P4A milestone: %s (%s)\n", milestone, name);
@@ -154,6 +204,7 @@ void run_execution(uint8_t* rdram,Execution& e,uint64_t root) {
                     if (!std::strcmp(name, "initRacePlayers") && !(path & Scene)) mark(DemoPlayers, "demo_race_players");
                     if (!std::strcmp(name, "initRaceSetupSaveMenu")) mark(Save, "save_select");
                     if (!std::strcmp(name, "updateRaceSetupRumblePrompt")) mark(Rumble, "rumble_prompt");
+                }
                 }
             }
         }

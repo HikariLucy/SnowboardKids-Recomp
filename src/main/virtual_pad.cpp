@@ -2,11 +2,14 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <array>
 #include <fstream>
 #include <sstream>
 #include <string>
 
 #include <SDL2/SDL.h>
+#include "recompinput/players.h"
+#include "recompinput/input_state.h"
 
 namespace sbk::virtual_pad {
 namespace {
@@ -21,6 +24,10 @@ uint8_t* rdram = nullptr;
 const char* path = nullptr;
 SDL_Joystick* joystick = nullptr;
 std::string last_line, last_guest;
+std::array<SDL_Joystick*, 4> multi_joysticks{};
+std::string last_multi_line, last_multi_guest;
+bool multi_assigned = false;
+int multi_requested_count = 0;
 
 uint8_t byte(uint32_t address) { return rdram[(address - 0x80000000u) ^ 3]; }
 uint32_t word(uint32_t address) { return *reinterpret_cast<const uint32_t*>(rdram + (address - 0x80000000u)); }
@@ -83,11 +90,113 @@ void log_guest() {
         std::fprintf(stderr, "VPAD guest %s\n", buf);
     }
 }
+
+void poll_multi(const char* multi_path) {
+    std::ifstream input(multi_path);
+    std::string line;
+    if (!std::getline(input, line)) return;
+    if (line != last_multi_line) {
+        last_multi_line = line;
+        std::istringstream fields(line);
+        int count = 0;
+        fields >> count;
+        if (count < 1 || count > 4) return;
+        multi_requested_count = count;
+        for (int port = 0; port < count; ++port) {
+            int lx = 0, ly = 0;
+            unsigned buttons = 0;
+            fields >> lx >> ly >> std::hex >> buttons >> std::dec;
+            if (lx == -99999) {
+                if (multi_joysticks[port]) {
+                    const SDL_JoystickID id = SDL_JoystickInstanceID(multi_joysticks[port]);
+                    SDL_JoystickClose(multi_joysticks[port]);
+                    multi_joysticks[port] = nullptr;
+                    for (int i = 0; i < SDL_NumJoysticks(); ++i)
+                        if (SDL_JoystickGetDeviceInstanceID(i) == id) SDL_JoystickDetachVirtual(i);
+                }
+                continue;
+            }
+            if (!multi_joysticks[port]) {
+                SDL_VirtualJoystickDesc desc{};
+                desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+                desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+                desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+                desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+                desc.name = "SBK isolated test controller";
+                const int index = SDL_JoystickAttachVirtualEx(&desc);
+                if (index >= 0) multi_joysticks[port] = SDL_JoystickOpen(index);
+            }
+            if (!multi_joysticks[port]) continue;
+            SDL_JoystickSetVirtualAxis(multi_joysticks[port], SDL_CONTROLLER_AXIS_LEFTX, Sint16(lx));
+            SDL_JoystickSetVirtualAxis(multi_joysticks[port], SDL_CONTROLLER_AXIS_LEFTY, Sint16(ly));
+            for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; ++b)
+                SDL_JoystickSetVirtualButton(multi_joysticks[port], b, (buttons >> b) & 1);
+        }
+        for (int port = count; port < 4; ++port) {
+            if (!multi_joysticks[port]) continue;
+            const SDL_JoystickID id = SDL_JoystickInstanceID(multi_joysticks[port]);
+            SDL_JoystickClose(multi_joysticks[port]);
+            multi_joysticks[port] = nullptr;
+            for (int i = 0; i < SDL_NumJoysticks(); ++i)
+                if (SDL_JoystickGetDeviceInstanceID(i) == id) SDL_JoystickDetachVirtual(i);
+        }
+        std::fprintf(stderr, "VMULTI host count=%d state=%s\n", count, line.c_str());
+    }
+    // Assignment is exercised through RecompInput's existing player flow.
+    // The SDL device-added events are processed on the next frontend tick.
+    if (!multi_assigned) {
+        bool all_open = true;
+        for (int port = 0; port < multi_requested_count; ++port) {
+            auto* pad = multi_joysticks[port];
+            if (!pad || !recompinput::get_controller_from_joystick_id(SDL_JoystickInstanceID(pad)))
+                all_open = false;
+        }
+        if (all_open) {
+            recompinput::playerassignment::start();
+            for (int port = 0; port < multi_requested_count; ++port) {
+                auto* pad = multi_joysticks[port];
+                SDL_Event event{};
+                event.type = SDL_CONTROLLERBUTTONDOWN;
+                event.cbutton.which = SDL_JoystickInstanceID(pad);
+                event.cbutton.button = SDL_CONTROLLER_BUTTON_A;
+                recompinput::playerassignment::process_sdl_event(&event);
+            }
+            if (recompinput::playerassignment::met_assignment_requirements()) {
+                recompinput::players::set_single_player_mode(false);
+                recompinput::playerassignment::apply_player_assignment();
+                multi_assigned = true;
+                std::fprintf(stderr, "VMULTI assigned=%zu\n",
+                             recompinput::players::get_number_of_assigned_players());
+            }
+        }
+    }
+    if (rdram) {
+        char buf[256];
+        int offset = std::snprintf(buf, sizeof(buf), " mask=%02x count=%u",
+            unsigned(byte(0x800B30F0u)), unsigned(byte(0x800E29C0u)));
+        for (int port = 0; port < 4; ++port) {
+            const uint32_t pad = kControllerPads + uint32_t(port * 6);
+            offset += std::snprintf(buf + offset, sizeof(buf) - size_t(offset),
+                " p%d=%04x,%d,%d,%u", port,
+                unsigned(byte(pad) << 8 | byte(pad + 1)), int(int8_t(byte(pad + 2))),
+                int(int8_t(byte(pad + 3))), unsigned(byte(pad + 4)));
+        }
+        if (last_multi_guest != buf) {
+            last_multi_guest = buf;
+            std::fprintf(stderr, "VMULTI guest%s\n", buf);
+        }
+    }
+}
 }
 
 void set_memory(uint8_t* memory) { rdram = memory; }
 
 void poll() {
+    static const char* multi_path = std::getenv("SBK_TEST_MULTI_PAD_FILE");
+    if (multi_path) {
+        poll_multi(multi_path);
+        return;
+    }
     static const bool enabled = (path = std::getenv("SBK_TEST_PAD_FILE")) != nullptr;
     if (!enabled) return;
     std::ifstream input(path);
