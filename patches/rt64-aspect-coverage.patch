@@ -1,0 +1,69 @@
+diff --git a/src/hle/rt64_framebuffer_pair.cpp b/src/hle/rt64_framebuffer_pair.cpp
+index c944393..b43bb42 100644
+--- a/src/hle/rt64_framebuffer_pair.cpp
++++ b/src/hle/rt64_framebuffer_pair.cpp
+@@ -44,6 +44,13 @@ namespace RT64 {
+         ditherPatterns[ditherIndex]++;
+     }
+ 
++    bool FramebufferPair::projectionCoversWidth(const FixedRect &projectionRect) const {
++        // Compare against what the pair drew, not the union of scissor states: a full-screen scissor set for a
++        // small overlay (e.g. blinking text) must not change the layout of the scene under it between frames.
++        const FixedRect &drawnRect = drawColorRect.isEmpty() ? scissorRect : drawColorRect;
++        return !projectionRect.isEmpty() && (projectionRect.ulx <= drawnRect.ulx) && (projectionRect.lrx >= drawnRect.lrx);
++    }
++
+     bool FramebufferPair::inProjection(uint32_t transformsIndex, Projection::Type type) const {
+         if (projectionCount > 0) {
+             const Projection &lastProj = projections[projectionCount - 1];
+diff --git a/src/hle/rt64_framebuffer_pair.h b/src/hle/rt64_framebuffer_pair.h
+index 60b0fa4..3f4e846 100644
+--- a/src/hle/rt64_framebuffer_pair.h
++++ b/src/hle/rt64_framebuffer_pair.h
+@@ -60,5 +60,6 @@ namespace RT64 {
+         int changeProjection(uint32_t transformsIndex, Projection::Type type);
+         bool isEmpty() const;
+         bool earlyPresentCandidate() const;
++        bool projectionCoversWidth(const FixedRect &projectionRect) const;
+     };
+ };
+\ No newline at end of file
+diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
+index 1cb4202..a10abef 100644
+--- a/src/render/rt64_framebuffer_renderer.cpp
++++ b/src/render/rt64_framebuffer_renderer.cpp
+@@ -1501,10 +1501,10 @@ namespace RT64 {
+             const bool adjustProjectionAspect = projectionAdjustsAspect(proj);
+             const float projectionExtOriginPercentage = adjustProjectionAspect ? 1.0f : extOriginPercentage;
+             if (proj.usesViewport()) {
+-                // The call's scissor spans the whole width of the framebuffer pair scissor. Custom origin must not be in use to be able to use the stretched viewport.
++                // The call's scissor spans the whole width the framebuffer pair drew. Custom origin must not be in use to be able to use the stretched viewport.
+                 const auto &viewport = drawData.rspViewports[proj.transformsIndex];
+                 FixedRect intersectionRect = proj.scissorRect.intersection(viewport.rect(viewportClipRatios));
+-                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
++                bool coversWholeWidth = fbPair.projectionCoversWidth(intersectionRect);
+                 bool horizontalRatio = !intersectionRect.isEmpty() && (intersectionRect.width(true, true) > intersectionRect.height(true, true));
+                 bool useWideViewport = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
+                 if (useWideViewport) {
+@@ -1734,7 +1734,7 @@ namespace RT64 {
+                     if (rtScene.instanceIndices.empty()) {
+                         float projRatioScale = 1.0f / aspectRatioScale;
+                         float invRatioScale = 1.0f / aspectRatioScale;
+-                        const bool coversScissorWidth = (proj.scissorRect.ulx <= fbPair.scissorRect.ulx) && (proj.scissorRect.lrx >= fbPair.scissorRect.lrx);
++                        const bool coversScissorWidth = fbPair.projectionCoversWidth(proj.scissorRect);
+                         if (coversScissorWidth) {
+                             invRatioScale = 1.0f;
+                         }
+diff --git a/src/render/rt64_projection_processor.cpp b/src/render/rt64_projection_processor.cpp
+index e842dcc..70ce94e 100644
+--- a/src/render/rt64_projection_processor.cpp
++++ b/src/render/rt64_projection_processor.cpp
+@@ -92,7 +92,7 @@ namespace RT64 {
+                 }
+ 
+                 if (!intersectionRect.isEmpty()) {
+-                    bool coversWholeWidth = (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
++                    bool coversWholeWidth = fbPair.projectionCoversWidth(intersectionRect);
+                     bool horizontalRatio = (intersectionRect.width(true, true) > intersectionRect.height(true, true));
+                     adjustAspectRatio = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
+                 }
