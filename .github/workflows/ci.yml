@@ -19,6 +19,11 @@ jobs:
         run: cmake --build build-ci
       - name: Test
         run: ctest --test-dir build-ci --output-on-failure
+      - name: Controller Pak suite under ASan/UBSan
+        run: |
+          # GCC 13 ASan cannot map shadow memory with the runner's 32-bit mmap entropy.
+          sudo sysctl vm.mmap_rnd_bits=28
+          python3 tests/controller_pak/run.py --sanitize address,undefined
       - name: Diff check
         run: git diff --check
   windows:
@@ -39,5 +44,11 @@ jobs:
         run: cmake --build build-ci --config Release
       - name: ROM-free tests
         run: ctest --test-dir build-ci -C Release --output-on-failure -V
+      - name: Controller Pak toolchain proof
+        shell: pwsh
+        run: |
+          $id = & build-ci/Release/SnowboardKidsControllerPakTest.exe --compiler
+          "Controller Pak test built by: $id"
+          if ($id -notmatch '^(MSVC|ClangCl) ') { throw "expected MSVC or clang-cl, got: $id" }
       - name: Diff check
         run: git diff --check

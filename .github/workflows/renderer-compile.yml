@@ -34,5 +34,23 @@ jobs:
         run: cmake --build build-ci --config Release
       - name: ROM-free tests
         run: ctest --test-dir build-ci -C Release --output-on-failure -V
+      - name: Controller Pak toolchain proof
+        shell: pwsh
+        run: |
+          $id = & build-ci/Release/SnowboardKidsControllerPakTest.exe --compiler
+          "Controller Pak test built by: $id"
+          if ($id -notmatch '^(MSVC|ClangCl) ') { throw "expected MSVC or clang-cl, got: $id" }
+      - name: Configure Controller Pak suite (clang-cl)
+        run: cmake -S . -B build-pfs-clangcl -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DSBK_ROM_FREE_CI=ON
+      - name: Build Controller Pak suite (clang-cl)
+        run: cmake --build build-pfs-clangcl --target SnowboardKidsControllerPakTest
+      - name: Controller Pak suite (clang-cl)
+        run: ctest --test-dir build-pfs-clangcl -R "^controller_pak$" --no-tests=error --output-on-failure -V
+      - name: Controller Pak clang-cl toolchain proof
+        shell: pwsh
+        run: |
+          $id = & build-pfs-clangcl/SnowboardKidsControllerPakTest.exe --compiler
+          "Controller Pak test built by: $id"
+          if ($id -notmatch '^ClangCl ') { throw "expected clang-cl, got: $id" }
       - name: Diff check
         run: git diff --check
