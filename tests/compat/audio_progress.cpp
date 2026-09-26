@@ -1,3 +1,5 @@
+// Assertions are the test: keep them in Release/NDEBUG builds too.
+#undef NDEBUG
 #include "main/audio_progress.hpp"
 #include <cassert>
 #include <cstdint>
