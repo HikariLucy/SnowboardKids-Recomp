@@ -4,6 +4,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <random>
+#include <string>
+#include <system_error>
 #include <vector>
 
 #define CHECK(expr, msg) \
@@ -87,9 +90,12 @@ int main(int argc, char** argv) {
         std::filesystem::path user_data = "/fake/userdata";
         auto candidates = sbk::module::GameModule::candidate_paths(app_dir, user_data);
         CHECK(!candidates.empty(), "Candidate paths must not be empty");
+        // Compare path elements, not strings: operator/ inserts the native
+        // separator ('\\' on Windows).
+        const std::filesystem::path modules_dir = user_data / "modules";
         bool found_userdata = false;
         for (const auto& c : candidates) {
-            if (c.string().find("/fake/userdata/modules") != std::string::npos) {
+            if (c.parent_path() == modules_dir || c.parent_path() == modules_dir / "snowboardkids-us") {
                 found_userdata = true;
                 break;
             }
@@ -157,6 +163,30 @@ int main(int argc, char** argv) {
         CHECK(!module.is_loaded(), "Module must report !is_loaded() after unload()");
         CHECK(module.api() == nullptr, "Module api() must be null after unload");
         std::cout << "[PASS] Clean unload verified" << std::endl;
+    }
+
+    // 10. Load from a directory with spaces and non-ASCII characters, then
+    // delete it: fails if the module (or our own handle) is still locked.
+    {
+        std::random_device rd;
+        const std::filesystem::path root = std::filesystem::temp_directory_path() /
+            ("sbk-loader-" + std::to_string(rd()));
+        const std::filesystem::path dir = root / "Snowboard Kids Test" / std::filesystem::path(u8"m\u00f3dulo \u00f1");
+        std::filesystem::create_directories(dir);
+        const std::filesystem::path copy = dir / module_path.filename();
+        std::filesystem::copy_file(module_path, copy);
+        {
+            sbk::module::GameModule spaced;
+            auto st = spaced.load(copy, err);
+            CHECK(st == sbk::module::LoadStatus::Success, err.c_str());
+            CHECK(spaced.api() != nullptr && spaced.api()->magic == SBK_MODULE_MAGIC, "Module in spaced/non-ASCII path must load");
+            spaced.unload();
+            CHECK(!spaced.is_loaded(), "Module must unload");
+        }
+        std::error_code ec;
+        std::filesystem::remove_all(root, ec);
+        CHECK(!ec && !std::filesystem::exists(root), "Temp module directory must be deletable after unload");
+        std::cout << "[PASS] Spaced/non-ASCII module path loaded, unloaded and deleted" << std::endl;
     }
 
     std::cout << "\nALL MODULE LOADER TESTS PASSED SUCCESSFULLY!" << std::endl;
