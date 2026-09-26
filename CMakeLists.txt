@@ -29,6 +29,43 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     )
 endif()
 
+# Controller Pak suite: the real PFS backend and HLE adapter, compiled with the
+# project's compiler (MSVC or clang-cl on Windows) and run directly by CTest.
+set(SBK_RECOMP_INCLUDE "${CMAKE_SOURCE_DIR}/.deps-runtime/N64ModernRuntime/N64Recomp/include"
+    CACHE PATH "N64Recomp headers (recomp.h) for the Controller Pak HLE test")
+set(SBK_PFS_SANITIZER "" CACHE STRING
+    "GCC/Clang only: -fsanitize= list for the Controller Pak test, e.g. address,undefined")
+function(sbk_add_controller_pak_test)
+    if(NOT EXISTS "${SBK_RECOMP_INCLUDE}/recomp.h")
+        message(FATAL_ERROR "recomp.h is missing from SBK_RECOMP_INCLUDE (${SBK_RECOMP_INCLUDE}). "
+            "Run: python3 scripts/bootstrap.py --only runtime")
+    endif()
+    add_executable(SnowboardKidsControllerPakTest
+        tests/controller_pak/main.cpp
+        tests/controller_pak/hle.cpp
+        tests/controller_pak/suite.cpp
+        src/pfs/controller_pak.cpp
+        src/pfs/hle.cpp
+    )
+    target_include_directories(SnowboardKidsControllerPakTest PRIVATE src "${SBK_RECOMP_INCLUDE}")
+    if(MSVC)
+        if(SBK_PFS_SANITIZER)
+            message(FATAL_ERROR "SBK_PFS_SANITIZER is only supported with GCC/Clang")
+        endif()
+        target_compile_options(SnowboardKidsControllerPakTest PRIVATE /W4)
+    else()
+        target_compile_options(SnowboardKidsControllerPakTest PRIVATE -Wall -Wextra -Werror)
+        if(SBK_PFS_SANITIZER)
+            target_compile_options(SnowboardKidsControllerPakTest PRIVATE
+                "-fsanitize=${SBK_PFS_SANITIZER}" -fno-sanitize-recover=all -fno-omit-frame-pointer)
+            target_link_options(SnowboardKidsControllerPakTest PRIVATE "-fsanitize=${SBK_PFS_SANITIZER}")
+        endif()
+    endif()
+    message(STATUS "Controller Pak test compiler: ${CMAKE_CXX_COMPILER_ID} "
+        "${CMAKE_CXX_COMPILER_VERSION} (${CMAKE_CXX_COMPILER})")
+    add_test(NAME controller_pak COMMAND SnowboardKidsControllerPakTest)
+endfunction()
+
 option(SBK_ROM_FREE_CI "Configure only ROM-free CI targets" OFF)
 if(SBK_ROM_FREE_CI)
     enable_testing()
@@ -67,8 +104,7 @@ if(SBK_ROM_FREE_CI)
     add_test(NAME ui_assets
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
-    add_test(NAME controller_pak
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
+    sbk_add_controller_pak_test()
     add_test(NAME release_artifact_audit
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_artifact_audit.py")
     add_test(NAME release_package
@@ -383,8 +419,7 @@ if(SBK_BUILD_NATIVE_BOOT)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    add_test(NAME controller_pak
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
+    sbk_add_controller_pak_test()
 
     add_library(SnowboardKidsSyntheticModule SHARED
         tests/module/synthetic_module.cpp
