@@ -2,7 +2,7 @@
 
 Base: `4ce33da18bdf9f95392cdf1015c9978371123c34`. This describes the pinned,
 locally patched source tree, not current upstream releases. The resulting
-implementation (exposed options, hidden framerate, VSync not exposed, tests)
+implementation (exposed options, hidden framerate, VSync, tests)
 is recorded in `UI-IMPLEMENTATION.md`.
 
 Abbreviations: FE = .deps-renderer/RecompFrontend/recompui;
@@ -23,7 +23,7 @@ NOT SUPPORTED refers to the current end-to-end SBK stack unless qualified.
 | Aspect ratio | SUPPORTED | Original/Expand → RT64 userConfig.aspectRatio. Original is default. Preserve GRAPHICS-ASPECT-01 geometry tests. |
 | Widescreen | PARTIAL | Expand adjusts projection/presentation; this is not proof of correct game framing/HUD everywhere. Label “Expand to window,” retain original 4:3. |
 | Ultrawide | PARTIAL | Expand can target window aspect; no SBK-wide ultrawide acceptance evidence. No ultrawide promise or preset. |
-| VSync | SUPPORTED BUT NOT EXPOSED (backend); PARTIAL end-to-end | Plume RenderSwapChain has setVsyncEnabled. No GraphicsConfig field or frontend binding. Vulkan Off requests Immediate only if supported; otherwise FIFO remains. Add only with capability-aware effective state, synchronization and persistence tests. |
+| VSync | SUPPORTED (On/Off) | Implemented by VSYNC-P1: Graphics → VSync, `graphics.json` `vsync`, default On, live apply on the RT64 present thread. Vulkan On = FIFO, Off = IMMEDIATE only when the surface offers it; D3D12 Off = tearing present only with tearing support (compile-checked, not live-verified); Metal On only. Off is disabled when unavailable. Adaptive/Mailbox not exposed. See `PRESENTATION-SYNC.md`. |
 | Frame pacing | PARTIAL | RT64 presentation queue plus Console/SkipBuffering/PresentEarly project override; default Console. Not a safe general settings control. Keep guest timing unchanged. |
 | Anti-aliasing / MSAA | SUPPORTED | msaa_option → antialiasing/updateMultisampling; UI None/2×/4×, gated by programmable sample positions and maximum MSAA. 8× enum existence alone is not justification to expose it. |
 | Downsampling | SUPPORTED | ds_option 0/2/4; supported at Original/Original2x. Explicit higher scales ignore ds. Harden numeric JSON override before exposing broadly. |
@@ -52,11 +52,11 @@ is no verified timed display confirmation; existing Apply/Revert is a temporary
 settings transaction, not a 15-second post-apply recovery mechanism. Retain it;
 no display mode enumeration or fragile countdown is planned.
 
-VSync must be dispatched on a thread/synchronization boundary safe for the
-present queue. Plume Vulkan changes requiredPresentMode and triggers recreation
-through needsResize. Calling this unsynchronized from a UI callback is not an
-acceptable implementation. VSync controls presentation, never guest VI timing
-or game FPS. Effective Off must not be claimed when Immediate is unavailable.
+VSync is applied on the RT64 present thread under its present lock (never
+from a UI callback): Plume Vulkan changes requiredPresentMode and the existing
+needsResize/resize path recreates the swapchain. The live swapchain's mode is
+reported as the effective state. VSync controls presentation, never guest VI
+timing or game FPS; Off is not offered when Immediate/tearing is unavailable.
 
 ## Internal resolution model
 

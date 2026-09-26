@@ -29,14 +29,16 @@ enforces this.
 | HUD Placement | Exposed, bound to RT64 (unchanged). |
 | Downsampling | Exposed; JSON accepts only 0/2/4 and the renderer scale ignores other factors. |
 | Framerate / high FPS | Hidden. Output forced to Original regardless of saved config. Guest timing untouched. |
-| VSync | **Not exposed.** Swapchain VSync needs a synchronized present-queue binding; none exists yet. |
+| VSync | Exposed: On / Off (`graphics.json` `vsync`, default On). Applied live on Apply, no restart. Off is disabled when the display/backend cannot present unsynchronized. Details and validation: `PRESENTATION-SYNC.md`. |
 | Display resolution, monitor, exclusive fullscreen, HDR, ultrawide presets, DLSS/FSR/XeSS | Not exposed (not supported end to end). |
 
 Config lives in user data (`graphics.json` under the user data folder or
 `SBK_USER_DATA_DIR`). A config file of the wrong JSON shape loads defaults
 (`n64modernruntime-config-shape.patch`). `tests/graphics_config/run.py`
 compiles the real schema with ASan/UBSan and checks process A → process B
-persistence for 42 combinations plus malformed values.
+persistence for 42 combinations plus malformed values, and VSync default,
+persistence across three processes, window-mode toggles, invalid values and
+capability gating.
 
 ## Model D first run
 

@@ -38,6 +38,15 @@ On subsequent launches, the engine detects the installed game module in user dat
 - **Savestates (`.sbks`)**: Press **F5** to quick-save, **F8** to quick-load. Savestate files store guest execution state, CPU registers, RAM, and continuation frames. Rebuilding the game module from the same ROM and compatible corpus preserves full savestate compatibility.
 - **Controller Pak (`.mpk`)**: Controller Pak persistence files live in `<user-data>/` and represent external physical memory cards. **Savestates do NOT serialize or rewind external Controller Pak media.** When an `.sbks` state is restored, the Controller Pak file on disk remains intact and is never rewound.
 
+
+### Graphics: VSync
+
+Settings → Graphics → **VSync** synchronizes frame presentation with the
+display. **On** is the default. **Off** is only offered when your display and
+driver support presenting without waiting for the display; otherwise it is
+greyed out. Changes apply immediately with **Apply**. VSync does not change
+the game's speed or timing.
+
 ---
 
 ## 3. Host Requirements
