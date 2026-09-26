@@ -1,3 +1,5 @@
+// assert() is the test and wraps the operations: keep it in NDEBUG builds.
+#undef NDEBUG
 #include "pfs/controller_pak.hpp"
 
 #include <algorithm>
@@ -25,6 +27,13 @@ std::vector<uint8_t> bytes(uint8_t marker, int size = 256) {
     std::vector<uint8_t> result(size);
     for (int i = 0; i < size; ++i) result[i] = uint8_t(marker + i);
     return result;
+}
+
+// Every replacement renames its temp image over the Pak; none may be left behind.
+bool no_temp_files(const std::filesystem::path& root) {
+    for (const auto& entry : std::filesystem::directory_iterator(root / "controller-paks"))
+        if (entry.path().filename().string().find(".tmp-") != std::string::npos) return false;
+    return true;
 }
 
 void normal(const std::filesystem::path& root) {
@@ -126,7 +135,30 @@ void process_c(const std::filesystem::path& root) {
         assert(reopened.find(0, identity(9), file) == Ok);
         assert(reopened.read(0, file, 0, output) == Ok && output == bytes(22));
     }
+    assert(no_temp_files(root));
     std::cout << "PASS cross-process A/B/C and 100 reopen cycles\n";
+}
+
+// Non-ASCII directory created in-process (not via narrow argv): the backend
+// must persist, replace and reopen through std::filesystem / wide Win32 APIs.
+void unicode_paths(const std::filesystem::path& root) {
+    const auto dir = root / std::filesystem::path(u8"Snowboard Kids PFS \u00f3 \u00f1");
+    int file;
+    {
+        ControllerPak pak(dir);
+        assert(pak.init(0) == Ok);
+        assert(pak.allocate(0, identity(20), 256, file) == Ok);
+        assert(pak.write(0, file, 0, bytes(21)) == Ok);
+        assert(pak.write(0, file, 0, bytes(23)) == Ok); // replaces the existing image
+    }
+    ControllerPak reopened(dir);
+    assert(reopened.init(0) == Ok);
+    assert(reopened.find(0, identity(20), file) == Ok);
+    std::vector<uint8_t> output(256);
+    assert(reopened.read(0, file, 0, output) == Ok && output == bytes(23));
+    assert(std::filesystem::file_size(dir / "controller-paks" / "port1.mpk") == image_size);
+    assert(no_temp_files(dir));
+    std::cout << "PASS non-ASCII path persist, replace and reopen\n";
 }
 
 void corrupt(const std::filesystem::path& root, const std::string& type) {
@@ -192,5 +224,6 @@ int main(int argc, char** argv) {
     else if (mode == "b") process_b(root);
     else if (mode == "c") process_c(root);
     else if (mode == "corrupt") corrupt(root, argv[3]);
+    else if (mode == "unicode") unicode_paths(root);
     else assert(false);
 }

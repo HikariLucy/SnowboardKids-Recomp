@@ -1,3 +1,5 @@
+// assert() is the test and wraps the operations: keep it in NDEBUG builds.
+#undef NDEBUG
 #include "pfs/hle.hpp"
 #include "recomp.h"
 
