@@ -52,6 +52,13 @@ if(SBK_ROM_FREE_CI)
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
     add_test(NAME module_builder_unit
         COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
+    add_executable(SnowboardKidsMenuActionsTest tests/frontend/menu_actions.cpp)
+    target_include_directories(SnowboardKidsMenuActionsTest PRIVATE src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(SnowboardKidsMenuActionsTest PRIVATE Threads::Threads)
+    add_test(NAME ui_menu_actions COMMAND SnowboardKidsMenuActionsTest)
+    add_test(NAME ui_assets
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
     add_test(NAME controller_pak
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controller_pak/run.py")
@@ -298,10 +305,10 @@ if(SBK_BUILD_RENDERER_STACK)
         "${CMAKE_BINARY_DIR}/RecompFrontend"
     )
 
-    add_subdirectory(
-        "${RECOMP_THEME_DIR}"
-        "${CMAKE_BINARY_DIR}/recomp-theme"
-    )
+    # Compile project-owned styling. Upstream theme checkout supplies only
+    # explicitly licensed fonts to the staging allowlist.
+    set(SNOWBOARDKIDS_THEME_SOURCES "${CMAKE_SOURCE_DIR}/src/ui/recomp_theme.cpp")
+    set(SNOWBOARDKIDS_THEME_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/src/ui")
 
     add_custom_target(SnowboardKidsRendererStack
         DEPENDS rt64 recompui recompinput
@@ -327,6 +334,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
@@ -339,6 +347,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
     target_compile_definitions(SnowboardKidsEngine PRIVATE SBK_ROM_FREE_ENGINE=1)
@@ -369,6 +378,13 @@ if(SBK_BUILD_NATIVE_BOOT)
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
     add_test(NAME module_builder_unit
         COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
+    add_executable(SnowboardKidsMenuActionsTest tests/frontend/menu_actions.cpp)
+    target_include_directories(SnowboardKidsMenuActionsTest PRIVATE src)
+    find_package(Threads REQUIRED)
+    target_link_libraries(SnowboardKidsMenuActionsTest PRIVATE Threads::Threads)
+    add_test(NAME ui_menu_actions COMMAND SnowboardKidsMenuActionsTest)
+    add_test(NAME ui_assets
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
     add_dependencies(SnowboardKidsRecompiled sbk_version_header)
     add_dependencies(SnowboardKidsEngine sbk_version_header)
@@ -451,16 +467,14 @@ if(SBK_BUILD_NATIVE_BOOT)
         target_link_libraries(SnowboardKidsEngine PRIVATE atomic)
     endif()
 
-    add_custom_command(TARGET SnowboardKidsRecompiled POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
-            "$<TARGET_FILE_DIR:SnowboardKidsRecompiled>/assets"
-    )
-    add_custom_command(TARGET SnowboardKidsEngine POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            "${SNOWBOARDKIDS_THEME_ASSETS_DIR}"
-            "$<TARGET_FILE_DIR:SnowboardKidsEngine>/assets"
-    )
+
+    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+        add_custom_command(TARGET ${SBK_EXE} POST_BUILD
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/stage_ui_assets.py"
+                --out "$<TARGET_FILE_DIR:${SBK_EXE}>/assets"
+            COMMENT "Staging reviewed fonts and original SBK UI assets"
+        )
+    endforeach()
 endif()
 
 # P2 coordinator remains inert unless SBK_P2_CYCLES is set at runtime.

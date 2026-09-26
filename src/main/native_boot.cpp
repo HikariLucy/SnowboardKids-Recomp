@@ -46,6 +46,7 @@
 #include "recompui/recompui.h"
 #include "util/file.h"
 #include "recomp_theme.h"
+#include "ui/menu.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
 #include "module/module_loader.hpp"
@@ -67,6 +68,7 @@ gpr get_entrypoint_address() {
     return static_cast<gpr>(static_cast<int32_t>(0x80000400u));
 }
 
+static bool frontend_preview = false;
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx);
 
 // RecompFrontend expects these program-owned globals.
@@ -203,6 +205,7 @@ void init_frontend_config(const recomp::GameEntry& game, bool mods_initialized) 
     general_options.has_gyro_sensitivity = false;
     general_options.has_mouse_sensitivity = false;
 
+    sbk::ui::register_menu(frontend_preview);
     for (const auto tab : sbk::frontend::config_tabs(game.mod_game_id, mods_initialized)) {
         switch (tab) {
             case sbk::frontend::ConfigTab::General: recompui::config::create_general_tab(general_options); break;
@@ -211,7 +214,7 @@ void init_frontend_config(const recomp::GameEntry& game, bool mods_initialized) 
                 apply_resolution_override();
                 break;
             case sbk::frontend::ConfigTab::Controls: recompui::config::create_controls_tab(); break;
-            case sbk::frontend::ConfigTab::Sound: recompui::config::create_sound_tab(); break;
+            case sbk::frontend::ConfigTab::Sound: recompui::config::create_sound_tab("Audio"); break;
             case sbk::frontend::ConfigTab::Mods:
                 // ModMenu requires the game mod id before the tab can build it.
                 recompui::update_game_mod_id(game.mod_game_id);
@@ -349,7 +352,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
     constexpr int height = 720;
 
     window = SDL_CreateWindow(
-        "Snowboard Kids: Recompiled — first boot",
+        "Snowboard Kids: Recompiled",
         SDL_WINDOWPOS_CENTERED,
         SDL_WINDOWPOS_CENTERED,
         width,
@@ -368,6 +371,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
 
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
     recompinput::handle_events();
+    sbk::ui::poll_menu_actions();
     sbk::quiescence::probe_poll();
     sbk::virtual_pad::poll();
     publish_controller_ports();
@@ -520,6 +524,7 @@ void poll_input() {
 }
 
 void start_game_on_first_vi() {
+    if (frontend_preview) return;
     static bool started = false;
     if (started) {
         return;
@@ -693,6 +698,10 @@ int main(int argc, char** argv) {
     std::filesystem::path validate_module_path;
 
     for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--frontend-preview") == 0) {
+            frontend_preview = true;
+            continue;
+        }
         if (std::strcmp(argv[i], "--version") == 0) {
             std::printf("Snowboard Kids Recompiled %s\ncommit %s\n", SBK_VERSION, SBK_COMMIT);
             return EXIT_SUCCESS;
@@ -703,6 +712,7 @@ int main(int argc, char** argv) {
                       "Options:\n"
                       "  --help                 Show help options\n"
                       "  --version              Show version info\n"
+                      "  --frontend-preview     Open ROM-free frontend for visual review\n"
                       "  --module <path>        Explicit path to SnowboardKidsGame dynamic module\n"
                       "  --rom <path>           Explicit path to Snowboard Kids (USA) ROM\n"
                       "  --build-module <rom>   Build and install game module from specified ROM and exit\n"
@@ -819,10 +829,11 @@ int main(int argc, char** argv) {
 
     // Attempt to discover and load game module (checking user data directory first)
     std::string mod_err;
-    auto mod_status = sbk::g_game_module.load_candidate(install_dir, runtime_dir, explicit_module_path, mod_err);
+    auto mod_status = sbk::module::LoadStatus::FileNotFound;
+    if (!frontend_preview) mod_status = sbk::g_game_module.load_candidate(install_dir, runtime_dir, explicit_module_path, mod_err);
 
     // First-run state machine if module is missing
-    if (!sbk::g_game_module.is_loaded()) {
+    if (!frontend_preview && !sbk::g_game_module.is_loaded()) {
 #if defined(SBK_ROM_FREE_ENGINE)
         std::printf("[FIRST-RUN] No compatible Snowboard Kids game module found (%s).\n",
                     sbk::module::status_string(mod_status));
@@ -942,7 +953,7 @@ int main(int argc, char** argv) {
     // UpdateConfigAction, and work admitted while P2 is disabled is never
     // counted (LIVE-STARTUP-01). SBK_SAVESTATES=0 disables them; the P2 probe
     // (SBK_P2_CYCLES) owns the barrier exclusively when set.
-    if (const char* flag = std::getenv("SBK_SAVESTATES"); flag && std::strcmp(flag, "0") == 0) {
+    if (const char* flag = std::getenv("SBK_SAVESTATES"); frontend_preview || (flag && std::strcmp(flag, "0") == 0)) {
         std::fprintf(stderr, "SAVESTATE disabled by SBK_SAVESTATES=0\n");
     } else if (std::getenv("SBK_P2_CYCLES")) {
         std::fprintf(stderr, "SAVESTATE disabled: SBK_P2_CYCLES probe already drives the barrier\n");
@@ -979,8 +990,18 @@ int main(int argc, char** argv) {
     initialize_controls(runtime_dir);
     game.entrypoint_address = get_entrypoint_address();
     init_frontend_config(game, false); // Mod subsystem is not initialized for this game.
+    if (frontend_preview) {
+        recompui::register_launcher_update_callback([](recompui::LauncherMenu*) {
+            static bool opened = false;
+            if (!opened) {
+                opened = true;
+                recompui::config::open();
+            }
+        });
+    }
 
 
+    if (!frontend_preview) {
     if (rom_path.empty()) {
         std::filesystem::path last_rom_file = runtime_dir / "last_rom_path.txt";
         if (std::filesystem::exists(last_rom_file)) {
@@ -1038,6 +1059,8 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 #endif
+
+    }
 
     sbk::register_overlays();
 
