@@ -12,7 +12,7 @@ import time
 
 ROOT = Path(__file__).resolve().parents[2]
 BUILD = ROOT / "build-split"
-ENGINE = BUILD / "SnowboardKidsEngine"
+ENGINE = Path(os.environ.get("SBK_ENGINE", BUILD / "SnowboardKidsEngine"))
 ROM = Path("/home/hikarilucy/proyectos/Recomp/snowboardkids.z64")
 
 
@@ -68,6 +68,15 @@ def test_fresh_user_journey():
             sys.exit(f"FAIL: Installed module not found at {installed_module}")
         if not manifest_file.is_file():
             sys.exit(f"FAIL: Manifest not found at {manifest_file}")
+
+        # The remembered ROM path is user data; the install stays read-only.
+        remembered = test_user_data / "last_rom_path.txt"
+        if remembered.read_text().strip() != str(ROM):
+            sys.exit(f"FAIL: ROM path not remembered in user data: {remembered}")
+        if (ENGINE.parent / "last_rom_path.txt").exists():
+            sys.exit("FAIL: last_rom_path.txt written beside the engine")
+        if not (test_user_data / "logs" / "first-run.log").is_file():
+            sys.exit("FAIL: first-run builder log missing from user data")
 
         mod_mtime_run1 = installed_module.stat().st_mtime
         print(f"Verified module installed: {installed_module} (size: {installed_module.stat().st_size} bytes)")

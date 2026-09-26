@@ -52,11 +52,16 @@ if(SBK_ROM_FREE_CI)
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
     add_test(NAME module_builder_unit
         COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
+    add_executable(SnowboardKidsFirstRunProcessTest tests/module/test_first_run.cpp src/ui/first_run_process.cpp)
+    target_include_directories(SnowboardKidsFirstRunProcessTest PRIVATE "${CMAKE_SOURCE_DIR}")
+    add_test(NAME ui_first_run_process COMMAND SnowboardKidsFirstRunProcessTest)
     add_executable(SnowboardKidsMenuActionsTest tests/frontend/menu_actions.cpp)
     target_include_directories(SnowboardKidsMenuActionsTest PRIVATE src)
     find_package(Threads REQUIRED)
     target_link_libraries(SnowboardKidsMenuActionsTest PRIVATE Threads::Threads)
     add_test(NAME ui_menu_actions COMMAND SnowboardKidsMenuActionsTest)
+    add_test(NAME ui_first_run_protocol
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_first_run_protocol.py")
     add_test(NAME ui_assets
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
@@ -335,6 +340,8 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/first_run_process.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/first_run_window.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
@@ -348,6 +355,8 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/first_run_process.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/first_run_window.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
     target_compile_definitions(SnowboardKidsEngine PRIVATE SBK_ROM_FREE_ENGINE=1)
@@ -378,11 +387,16 @@ if(SBK_BUILD_NATIVE_BOOT)
         COMMAND SnowboardKidsModuleLoaderTest "$<TARGET_FILE:SnowboardKidsSyntheticModule>")
     add_test(NAME module_builder_unit
         COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_builder_unit.py")
+    add_executable(SnowboardKidsFirstRunProcessTest tests/module/test_first_run.cpp src/ui/first_run_process.cpp)
+    target_include_directories(SnowboardKidsFirstRunProcessTest PRIVATE "${CMAKE_SOURCE_DIR}")
+    add_test(NAME ui_first_run_process COMMAND SnowboardKidsFirstRunProcessTest)
     add_executable(SnowboardKidsMenuActionsTest tests/frontend/menu_actions.cpp)
     target_include_directories(SnowboardKidsMenuActionsTest PRIVATE src)
     find_package(Threads REQUIRED)
     target_link_libraries(SnowboardKidsMenuActionsTest PRIVATE Threads::Threads)
     add_test(NAME ui_menu_actions COMMAND SnowboardKidsMenuActionsTest)
+    add_test(NAME ui_first_run_protocol
+        COMMAND "${Python3_EXECUTABLE}" -m unittest discover -s "${CMAKE_SOURCE_DIR}/tests/module" -p "test_first_run_protocol.py")
     add_test(NAME ui_assets
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
@@ -467,6 +481,26 @@ if(SBK_BUILD_NATIVE_BOOT)
         target_link_libraries(SnowboardKidsEngine PRIVATE atomic)
     endif()
 
+    # First-run setup draws with the FreeType build RmlUi already requires.
+    if(WIN32)
+        list(APPEND CMAKE_MODULE_PATH "${RECOMP_FRONTEND_DIR}/recompui/lib")
+    endif()
+    find_package(Freetype REQUIRED)
+    target_link_libraries(SnowboardKidsRecompiled PRIVATE Freetype::Freetype)
+    target_link_libraries(SnowboardKidsEngine PRIVATE Freetype::Freetype)
+
+    add_executable(SnowboardKidsFirstRunUITest
+        tests/frontend/first_run_ui.cpp
+        src/ui/first_run_process.cpp
+        src/ui/first_run_window.cpp
+    )
+    target_include_directories(SnowboardKidsFirstRunUITest PRIVATE src ${SDL2_INCLUDE_DIRS})
+    target_link_libraries(SnowboardKidsFirstRunUITest PRIVATE SDL2::SDL2 Freetype::Freetype)
+    add_test(NAME ui_first_run_layout
+        COMMAND SnowboardKidsFirstRunUITest "$<TARGET_FILE_DIR:SnowboardKidsEngine>/assets")
+    set_tests_properties(ui_first_run_layout PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
+    add_test(NAME ui_graphics_config
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/graphics_config/run.py")
 
     foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
         add_custom_command(TARGET ${SBK_EXE} POST_BUILD
