@@ -90,6 +90,14 @@ if(NOT EXISTS "${N64_RUNTIME_DIR}/librecomp/include/librecomp/rsp.hpp")
     )
 endif()
 
+# CI-only: compile the patched renderer/frontend/runtime stack without the
+# ROM-derived CPU and RSP sources. Never a production or packaging path.
+option(SBK_RENDERER_COMPILE_CI "CI only: build the renderer stack without ROM-derived code" OFF)
+if(SBK_RENDERER_COMPILE_CI)
+    if(NOT SBK_BUILD_RENDERER_STACK OR SBK_BUILD_NATIVE_BOOT OR SBK_BUILD_RUNTIME_SMOKE OR SBK_BUILD_QUIESCENCE_TESTS)
+        message(FATAL_ERROR "SBK_RENDERER_COMPILE_CI requires SBK_BUILD_RENDERER_STACK=ON and no executables that need ROM-derived code")
+    endif()
+else()
 option(SBK_CONTINUATIONS "Explicit serializable continuation backend (P4-A validated)" OFF)
 set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/RecompiledFuncs")
 if(SBK_CONTINUATIONS)
@@ -173,6 +181,7 @@ add_custom_target(SnowboardKidsNativeCore
 )
 
 message(STATUS "Configured Snowboard Kids native-core compile validation")
+endif()
 
 
 option(SBK_BUILD_RUNTIME_SMOKE "Build the N64ModernRuntime GameEntry/ROM smoke executable" OFF)
@@ -306,6 +315,12 @@ if(SBK_BUILD_RENDERER_STACK)
 
     set(RECOMP_FRONTEND_N64MODERNRUNTIME_PATH "${N64_RUNTIME_DIR}")
     set(RECOMP_FRONTEND_RT64_PATH "${RT64_DIR}")
+
+    # On Windows RecompFrontend reads SDL2 headers from sdl2_SOURCE_DIR; use
+    # the SDL2 development tree RT64 already links on Windows.
+    if(WIN32 AND NOT sdl2_SOURCE_DIR)
+        set(sdl2_SOURCE_DIR "${RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3")
+    endif()
 
     add_subdirectory(
         "${RECOMP_FRONTEND_DIR}"

@@ -1,0 +1,38 @@
+name: Renderer stack compile (ROM-free)
+# Compiles the pinned RT64 / RecompFrontend / N64ModernRuntime stack with the
+# canonical patch series on Windows (D3D12 and Vulkan backends). No ROM,
+# no ROM-derived code, no packaging: SBK_RENDERER_COMPILE_CI is CI-only.
+on:
+  push:
+    branches: [feat/vsync-presentation]
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 150
+    steps:
+      # The patch checker compares bytes with upstream Git blobs.
+      - name: Keep LF checkouts
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ninja
+        run: choco install ninja
+      - name: Configure Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Bootstrap pinned dependencies and canonical patches
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme
+      - name: Configure renderer stack (clang-cl, as upstream RT64)
+        run: cmake -S . -B build-rci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DSBK_RENDERER_COMPILE_CI=ON -DSBK_BUILD_RENDERER_STACK=ON
+      - name: Build RT64, RecompFrontend and runtime config
+        run: cmake --build build-rci --target SnowboardKidsRendererStack
+      - name: Configure ROM-free tests
+        run: cmake -S . -B build-ci -G "Visual Studio 17 2022" -DSBK_ROM_FREE_CI=ON
+      - name: Build ROM-free tests
+        run: cmake --build build-ci --config Release
+      - name: ROM-free tests supported on Windows
+        run: ctest --test-dir build-ci -C Release -E "controller_pak" --output-on-failure
+      - name: Diff check
+        run: git diff --check
