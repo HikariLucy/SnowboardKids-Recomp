@@ -32,7 +32,7 @@ jobs:
         run: cmake -S . -B build-ci -G "Visual Studio 17 2022" -DSBK_ROM_FREE_CI=ON
       - name: Build ROM-free tests
         run: cmake --build build-ci --config Release
-      - name: ROM-free tests supported on Windows
-        run: ctest --test-dir build-ci -C Release --output-on-failure
+      - name: ROM-free tests
+        run: ctest --test-dir build-ci -C Release --output-on-failure -V
       - name: Diff check
         run: git diff --check
