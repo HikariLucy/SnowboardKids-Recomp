@@ -81,8 +81,8 @@ for local synthetic-package tests while `THIRD_PARTY_NOTICES.md` contains
 ## CI and test classes
 
 `.github/workflows/ci.yml` configures ROM-free CMake targets on Ubuntu and
-Windows. Linux also tests Controller Pak with pinned runtime headers; Windows
-runs audio and release tooling tests. No GPU, display, audio device or ROM is
+Windows. Both bootstrap the pinned runtime headers and theme fonts and run
+the full ROM-free set, including Controller Pak (`WINDOWS-PFS-CI.md`). No GPU, display, audio device or ROM is
 needed. `.github/workflows/artifacts.yml` is a manual readiness gate that
 fails explicitly until licensing and clean-checkout generated-input blockers
 are resolved. It does not upload a misleading binary or create a release.

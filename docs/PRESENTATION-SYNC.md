@@ -177,5 +177,5 @@ RecompFrontend (VSync option) and the runtime config compiled.
 Windows ROM-free CTest: **12/12 PASS** in run 36245526088 (after the
 Windows portability fixes to `module_loader_synthetic` and
 `module_builder_unit`), with the renderer stack still compiling in the same
-run. `controller_pak` stays excluded on Windows as in the existing ROM-free
-CI job; it was not part of this change.
+run. With `controller_pak` enabled (see `WINDOWS-PFS-CI.md`): **Windows
+ROM-free CTest 13/13 PASS**, no exclusions (runs 36248017470, 36248017480).
