@@ -1,8 +1,9 @@
 # Graphics capabilities — source audit
 
 Base: `4ce33da18bdf9f95392cdf1015c9978371123c34`. This describes the pinned,
-locally patched source tree, not current upstream releases. Runtime acceptance
-and new persistence tests remain pending. No new options are implemented yet.
+locally patched source tree, not current upstream releases. The resulting
+implementation (exposed options, hidden framerate, VSync not exposed, tests)
+is recorded in `UI-IMPLEMENTATION.md`.
 
 Abbreviations: FE = .deps-renderer/RecompFrontend/recompui;
 RT = .deps-renderer/rt64/src; UM = .deps-runtime/N64ModernRuntime/ultramodern.
