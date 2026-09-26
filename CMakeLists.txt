@@ -20,10 +20,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     get_filename_component(RECOMP_PROJ_PARENT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
+    # The last matching map wins: broadest first so the checkout's own
+    # directory name never reaches embedded __FILE__ strings.
     add_compile_options(
-        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
-        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
         "-ffile-prefix-map=${RECOMP_PROJ_PARENT}=."
+        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
+        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
     )
 endif()
 
