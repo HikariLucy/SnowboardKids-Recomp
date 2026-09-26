@@ -18,7 +18,7 @@ void apply() {
     const Color disabled{83, 101, 115, 255};
     const Color disabled_bg{220, 226, 228, 255};
 
-    register_primary_font("LatoLatin-Regular.ttf", "Lato Latin");
+    register_primary_font("LatoLatin-Regular.ttf", "LatoLatin");
     for (const char* font : {"LatoLatin-Italic.ttf", "LatoLatin-Bold.ttf",
                              "LatoLatin-BoldItalic.ttf", "Fredoka.ttf"}) {
         register_extra_font(font);
@@ -38,8 +38,9 @@ void apply() {
         for (color id : ids) theme.colors[static_cast<std::size_t>(id)] = value;
     };
     colors({color::Background1, color::Background2, color::BGOverlay, color::ModalOverlay}, snow);
-    colors({color::Background3, color::Elevated, color::ElevatedSoft}, ice);
-    colors({color::BGShadow, color::BGShadow2, color::Border, color::BorderSoft,
+    // Shadows are background roles here (footers, headers): keep them light.
+    colors({color::Background3, color::Elevated, color::ElevatedSoft, color::BGShadow, color::BGShadow2}, ice);
+    colors({color::Border, color::BorderSoft,
             color::BorderHard, color::BorderSolid, color::ElevatedBorder,
             color::ElevatedBorderHard}, ink);
     colors({color::Text, color::TextActive, color::TextDim, color::TextA5, color::TextA20,
@@ -48,9 +49,12 @@ void apply() {
     colors({color::Primary, color::PrimaryL, color::PrimaryD}, ink);
     colors({color::PrimaryA5, color::PrimaryA20, color::PrimaryA30,
             color::PrimaryA50, color::PrimaryA80}, ice);
-    colors({color::Secondary, color::SecondaryL, color::SecondaryD,
+    // Secondary drives focus pulses and rings on light panels: keep it dark.
+    // Sun stays the focus background via the explicit widget styles below.
+    colors({color::Secondary, color::SecondaryD,
             color::SecondaryA5, color::SecondaryA20, color::SecondaryA30,
-            color::SecondaryA50, color::SecondaryA80}, sun);
+            color::SecondaryA50, color::SecondaryA80}, slope);
+    colors({color::SecondaryL}, ink);
     colors({color::Warning, color::WarningL, color::WarningD,
             color::Danger, color::DangerL, color::DangerD}, warning);
     colors({color::WarningA5, color::WarningA20, color::WarningA30,
@@ -70,7 +74,7 @@ void apply() {
     auto panel = [&](Style& style) {
         style.set_background_color(snow);
         style.set_color(ink);
-        style.set_font_family("Lato Latin");
+        style.set_font_family("LatoLatin");
         style.set_font_size(24.0f);
         style.set_border_color(ink);
         style.set_border_width(6.0f);
@@ -79,7 +83,7 @@ void apply() {
     auto interactive = [&](t::InteractiveStyle& style) {
         style.normal.set_background_color(snow);
         style.normal.set_color(ink);
-        style.normal.set_font_family("Lato Latin");
+        style.normal.set_font_family("LatoLatin");
         style.normal.set_border_color(ink);
         style.normal.set_border_width(3.0f);
         style.normal.set_border_radius(4.0f);
@@ -96,7 +100,7 @@ void apply() {
         style.disabled.set_border_color(disabled);
     };
     theme.modal.overlay.set_background_color(Color{23, 43, 70, 180});
-    theme.modal.overlay.set_font_family("Lato Latin");
+    theme.modal.overlay.set_font_family("LatoLatin");
     panel(theme.modal.frame);
     theme.modal.frame.set_padding(24.0f);
     theme.modal.header.set_background_color(snow);
@@ -114,6 +118,8 @@ void apply() {
     tabs.selected.set_color(ink);
     tabs.selected.set_background_color(sun);
     tabs.pulsing.set_color(ink);
+    tabs.pulsing.set_background_color(ice);
+    tabs.focus_text_color = ink; // readable on sun (selected) and ice (focused)
     tabs.indicator.set_height(4.0f);
     tabs.indicator_color = ink;
 
@@ -130,7 +136,7 @@ void apply() {
 
     auto& assignment = theme.in_game_player_assignment;
     assignment.page.set_background_color(slope);
-    assignment.page.set_font_family("Lato Latin");
+    assignment.page.set_font_family("LatoLatin");
     panel(assignment.content);
     assignment.content.set_padding(24.0f);
     assignment.heading.set_color(ink);

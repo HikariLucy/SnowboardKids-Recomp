@@ -1,0 +1,59 @@
+diff --git a/recompui/src/elements/ui_frontend_theme.h b/recompui/src/elements/ui_frontend_theme.h
+index 54e8ba4..48a0717 100644
+--- a/recompui/src/elements/ui_frontend_theme.h
++++ b/recompui/src/elements/ui_frontend_theme.h
+@@ -21,6 +21,8 @@ struct TabTheme {
+     Style pulsing;
+     Style indicator;
+     Color indicator_color = get_theme_color(color::BorderSolid);
++    // Focused tab text; unset keeps the white pulse meant for dark headers.
++    std::optional<Color> focus_text_color;
+ };
+ 
+ enum class TogglePreset {
+diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
+index fb69535..5e0b163 100644
+--- a/recompui/src/elements/ui_tab_set.cpp
++++ b/recompui/src/elements/ui_tab_set.cpp
+@@ -58,6 +58,7 @@ void Tab::apply_theme(const theme::TabTheme &tab_theme) {
+     pulsing_style.apply_style(tab_theme.pulsing);
+     indicator->apply_style(tab_theme.indicator);
+     selected_indicator_color = tab_theme.indicator_color;
++    focus_text_color = tab_theme.focus_text_color;
+     indicator->set_background_color(is_selected ? selected_indicator_color : theme::get_theme_color(theme::color::Transparent));
+     apply_styles();
+ }
+@@ -100,7 +101,7 @@ void Tab::process_event(const Event &e) {
+         break;
+     case EventType::Update:
+         if (is_style_enabled(focus_state) && !is_mouse_active()) {
+-            recompui::Color pulse_color = recompui::get_pulse_color(750);
++            recompui::Color pulse_color = focus_text_color.value_or(recompui::get_pulse_color(750));
+             pulsing_style.set_color(pulse_color);
+             if (is_selected) {
+                 indicator->set_background_color(selected_indicator_color);
+@@ -111,7 +112,11 @@ void Tab::process_event(const Event &e) {
+             queue_update();
+         }
+         else if (is_style_enabled(focus_state)) {
+-            pulsing_style.set_color(theme::color::White);
++            if (focus_text_color) {
++                pulsing_style.set_color(*focus_text_color);
++            } else {
++                pulsing_style.set_color(theme::color::White);
++            }
+             indicator->set_background_color(is_selected ? selected_indicator_color : theme::get_theme_color(theme::color::Transparent));
+             apply_styles();
+         }
+diff --git a/recompui/src/elements/ui_tab_set.h b/recompui/src/elements/ui_tab_set.h
+index 02dac1d..c2c4c96 100644
+--- a/recompui/src/elements/ui_tab_set.h
++++ b/recompui/src/elements/ui_tab_set.h
+@@ -20,6 +20,7 @@ namespace recompui {
+         Element *label = nullptr;
+         Element *indicator = nullptr;
+         Color selected_indicator_color = theme::get_theme_color(theme::color::BorderSolid);
++        std::optional<Color> focus_text_color;
+ 
+         bool visible = true;
+ 
