@@ -114,14 +114,16 @@ class ModuleBuilderService:
         tmp_workspace = Path(tmp_dir_obj.name)
 
         try:
+            # CPU translations are the existing reviewed corpus, not fabricated work.
+            notify("Locating recompiled game corpus", 3, 6)
+            corpus_dir = find_corpus_dir(self.root_dir)
+
             # 3. Generate RSP microcode
             notify("Generating RSP audio microcode", 3, 6)
             rsp_dir = tmp_workspace / "rsp"
             rsp_cpp = generate_rsp_code(self.root_dir, rom_bytes, rsp_dir)
 
             # 4. Gather CPU translation units
-            notify("Locating recompiled game corpus", 4, 6)
-            corpus_dir = find_corpus_dir(self.root_dir)
             sources, include_dirs = collect_module_sources(self.root_dir, corpus_dir, rsp_cpp)
 
             # 5. Compile sources into temporary library
@@ -152,6 +154,7 @@ class ModuleBuilderService:
 
             # 7. Atomic installation into target directory
             # Staged into target_dir with temporary names, then atomic replaced
+            notify("Installing validated module")
             staged_mod = target_dir / f".tmp_{default_module_filename()}.staging"
             staged_man = target_dir / ".tmp_MODULE-INFO.json.staging"
 

@@ -10,6 +10,32 @@ from .service import BuilderConfig, ModuleBuilderService
 VERSION = "1.0.0"
 
 
+def emit_status(phase: str, current=None, total=None, *, protocol=False):
+    """Version-one line protocol. Counts describe completed compile units only."""
+    if protocol:
+        name = None
+        if phase.startswith(("Validating ROM", "Discovering")):
+            name = "validate"
+        elif phase.startswith("Locating recompiled"):
+            name = "cpu"
+        elif phase.startswith("Generating RSP"):
+            name = "rsp"
+        elif phase.startswith("Compiling"):
+            name = "compile"
+        elif phase.startswith("Validating module"):
+            name = "validate_module"
+        elif phase.startswith("Installing"):
+            name = "install"
+        if name:
+            cur, tot = (current, total) if phase.startswith("Compiling [") else (0, 0)
+            print(f"SBK_PROGRESS\t{name}\t{cur}\t{tot}", flush=True)
+        return
+    if current is not None and total == 6 and not phase.startswith("Compiling ["):
+        print(f"[{current}/{total}] {phase}...", flush=True)
+    else:
+        print(f"  -> {phase}", flush=True)
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="SnowboardKidsModuleBuilder",
@@ -36,6 +62,7 @@ Exit Codes:
     parser.add_argument("--cxx", type=str, default=None, help="Explicit C++ compiler executable")
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive prompts")
     parser.add_argument("--keep-temp", "--debug", action="store_true", help="Preserve temporary build files for diagnostics")
+    parser.add_argument("--progress-protocol", action="store_true", help="Emit machine-readable first-run phase events")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
 
     args = parser.parse_args(argv)
@@ -57,10 +84,7 @@ Exit Codes:
     )
 
     def print_status(phase: str, current: int = None, total: int = None):
-        if current is not None and total is not None and total == 6:
-            print(f"[{current}/{total}] {phase}...", flush=True)
-        else:
-            print(f"  -> {phase}", flush=True)
+        emit_status(phase, current, total, protocol=args.progress_protocol)
 
     print("==================================================")
     print(" Snowboard Kids Local Game Module Builder")
