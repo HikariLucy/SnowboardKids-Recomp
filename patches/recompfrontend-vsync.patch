@@ -1,0 +1,113 @@
+diff --git a/recompui/include/recompui/config.h b/recompui/include/recompui/config.h
+index a96f715..74c9789 100644
+--- a/recompui/include/recompui/config.h
++++ b/recompui/include/recompui/config.h
+@@ -62,9 +62,11 @@ namespace recompui {
+                 inline const std::string hpfb_option = "hpfb_option";
+                 inline const std::string rr_manual_value = "rr_manual_value";
+                 inline const std::string ds_option = "ds_option";
++                inline const std::string vsync_option = "vsync";
+             }
+     
+             void update_msaa_supported(bool supported);
++            void update_vsync_off_supported(bool supported);
+             void update_refresh_rate(uint32_t refresh_rate);
+             void toggle_fullscreen();
+         }
+diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
+index 40e0fe4..4b88cf6 100644
+--- a/recompui/src/config/ui_config_tab_graphics.cpp
++++ b/recompui/src/config/ui_config_tab_graphics.cpp
+@@ -91,6 +91,11 @@ namespace recompui {
+             {ultramodern::renderer::HighPrecisionFramebuffer::Off, "Off"},
+         };
+ 
++        static EnumOptionVector vsync_options = {
++            {ultramodern::renderer::VSync::On, "On"},
++            {ultramodern::renderer::VSync::Off, "Off"},
++        };
++
+         static EnumOptionVector hud_ratio_mode_options = {
+             {ultramodern::renderer::HUDRatioMode::Original, "Original"},
+             {ultramodern::renderer::HUDRatioMode::Clamp16x9, "Clamp16x9", "16:9"},
+@@ -180,6 +185,7 @@ namespace recompui {
+             new_config.rr_manual_value = 60;
+ 
+             new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
++            new_config.vsync_option = get_graphics_enum_value<ultramodern::renderer::VSync>(graphics::options::vsync_option);
+ 
+             ultramodern::renderer::set_graphics_config(new_config);
+         }
+@@ -206,6 +212,12 @@ namespace recompui {
+             }
+         }
+ 
++        void graphics::update_vsync_off_supported(bool supported) {
++            recomp::config::Config &config = get_graphics_config();
++            config.update_enum_option_disabled(graphics::options::vsync_option, static_cast<uint32_t>(ultramodern::renderer::VSync::Off), !supported);
++            config.update_option_enum_details(graphics::options::vsync_option, supported ? "" : "Off is not available on this display.");
++        }
++
+         void graphics::update_refresh_rate(uint32_t refresh_rate) {
+             recomp::config::Config& config = get_graphics_config();
+             std::string framerate_text = get_framerate_text(refresh_rate);
+@@ -314,6 +326,14 @@ namespace recompui {
+                 wm_default()
+             );
+ 
++            config.add_enum_option(
++                graphics::options::vsync_option,
++                "VSync",
++                "Synchronize frame presentation with the display.",
++                vsync_options,
++                ultramodern::renderer::VSync::On
++            );
++
+             config.add_enum_option(
+                 graphics::options::rr_option,
+                 "Framerate",
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index e583a00..36d17a0 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -3,6 +3,7 @@
+ #include "xxHash/xxh3.h"
+ #include <memory>
+ #include <cstring>
++#include <cstdlib>
+ #include <variant>
+ #include <algorithm>
+ 
+@@ -300,6 +301,10 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+             break;
+     }
+ 
++    // Opt-in present pacing summary for validation runs only.
++    const char *present_timing_env = std::getenv("SBK_PRESENT_TIMING");
++    app->logPresentTiming = (present_timing_env != nullptr) && (std::strcmp(present_timing_env, "1") == 0);
++
+     // Set up the RT64 application.
+     uint32_t thread_id = 0;
+ #ifdef _WIN32
+@@ -316,6 +321,10 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+     // Set the application's fullscreen state.
+     app->setFullScreen(cur_config.wm_option == ultramodern::renderer::WindowMode::Fullscreen);
+ 
++    // Presentation sync is applied by the present thread before the swap chain is first created.
++    app->setVsyncEnabled(cur_config.vsync_option != ultramodern::renderer::VSync::Off);
++    recompui::config::graphics::update_vsync_off_supported(app->vsyncOffSupported);
++
+     // Check if the selected device actually supports MSAA sample positions and MSAA for for the formats that will be used
+     // and downgrade the configuration accordingly.
+     if (app->device->getCapabilities().sampleLocations) {
+@@ -856,6 +865,10 @@ bool renderer::RT64Context::update_config(const ultramodern::renderer::GraphicsC
+         app->setFullScreen(new_config.wm_option == ultramodern::renderer::WindowMode::Fullscreen);
+     }
+ 
++    if (new_config.vsync_option != old_config.vsync_option) {
++        app->setVsyncEnabled(new_config.vsync_option != ultramodern::renderer::VSync::Off);
++    }
++
+     set_application_user_config(app.get(), new_config);
+ 
+     // When updating the user configuration, only discard framebuffers if an option was changed that affects the resolution.
