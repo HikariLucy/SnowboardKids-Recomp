@@ -164,3 +164,19 @@ Present timing on this 144 Hz display showed no meaningful On/Off difference
 
 Vulkan validation layers: NOT AVAILABLE on the test machine (Khronos
 validation layer not installed).
+
+## Windows
+
+GitHub Actions `Renderer stack compile (ROM-free)` run 36244065956
+(windows-2022, clang-cl + Ninja in the MSVC developer environment):
+bootstrap and all canonical patches applied on a fresh checkout, and
+RT64 (D3D12 + Vulkan, including the D3D12 VSync capability branch),
+RecompFrontend (VSync option) and the runtime config compiled.
+**D3D12: COMPILE PASS / LIVE NOT VERIFIED.**
+
+The ROM-free CTest step in the same run passed 10/12, including
+`compat_audio_progress` and the release tests. The two failures predate this
+branch and are unrelated to VSync: `module_loader_synthetic` (user-data module
+path candidate) and `module_builder_unit` (Windows temp-file sharing and
+POSIX path assertions); the earlier `feat/split-game-module` Windows job
+failed its test step as well.
