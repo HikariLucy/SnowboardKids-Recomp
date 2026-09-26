@@ -4,10 +4,12 @@ import argparse
 from pathlib import Path
 import subprocess
 import sys
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from dependency_lock import DEPENDENCIES
+from stage_ui_assets import validate_assets, validate_archive
 
 
 def check_provenance(root=ROOT):
@@ -27,7 +29,7 @@ def check_provenance(root=ROOT):
     return True, None
 
 
-def run_checks(root=ROOT):
+def run_checks(root=ROOT, assets=None, archive=None):
     passes = []
     blockers = []
 
@@ -78,12 +80,18 @@ def run_checks(root=ROOT):
     else:
         passes.append(("dependency_gpl_compliance", "GPL source disclosure obligations satisfied"))
 
-    # 6. Theme assets (UI navigation icons vs decorative)
-    theme_repo = root / ".deps-renderer/recomp-theme"
-    if (theme_repo / "LICENSE").is_file() or (theme_repo / "LICENSE.txt").is_file():
-        passes.append(("theme_asset_icons", "theme assets license cleared"))
+    # 6. Owned asset provenance needs evidence from staging AND final packaging.
+    # This clears only old-theme icon provenance, never the project license.
+    if assets is None or archive is None:
+        blockers.append(("theme_asset_icons", "provide --assets and --archive for owned asset byte verification"))
     else:
-        blockers.append(("theme_asset_icons", "theme UI navigation icons lack documented author redistribution grant"))
+        try:
+            validate_assets(Path(assets), root)
+            validate_archive(Path(archive), root)
+        except (OSError, ValueError, zipfile.BadZipFile, RuntimeError) as error:
+            blockers.append(("theme_asset_icons", str(error)))
+        else:
+            passes.append(("theme_asset_icons", "staged and packaged assets match reviewed original SVGs and licensed fonts"))
 
     # 7. Game-derived recompiled material / distribution model
     blockers.append(("game_distribution_model", "MODEL_D_TECHNICALLY_IMPLEMENTED: local user-ROM module builder implemented; release clearance pending distribution policy and legal clearance"))
@@ -94,10 +102,12 @@ def run_checks(root=ROOT):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root', type=Path, default=ROOT, help='Project root directory')
+    parser.add_argument('--assets', type=Path, help='Staged build assets directory')
+    parser.add_argument('--archive', type=Path, help='Local draft archive for byte verification')
     parser.add_argument('--quiet-pass', action='store_true', help='Only print blockers')
     args = parser.parse_args()
 
-    passes, blockers = run_checks(args.root)
+    passes, blockers = run_checks(args.root, assets=args.assets, archive=args.archive)
 
     if not args.quiet_pass:
         for name, _ in passes:

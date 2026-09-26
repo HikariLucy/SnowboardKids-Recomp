@@ -15,8 +15,8 @@ class PackageTest(unittest.TestCase):
             binary = temp / 'SnowboardKidsRecompiled'
             binary.write_bytes(b'ELF synthetic test binary')
             assets = temp / 'assets'
-            assets.mkdir()
-            (assets / 'font.ttf').write_bytes(b'synthetic test font')
+            subprocess.run([sys.executable, str(ROOT / 'scripts/stage_ui_assets.py'),
+                            '--out', str(assets)], check=True)
             archives = [temp / 'A.zip', temp / 'B.zip']
             for archive in archives:
                 subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'),
@@ -26,11 +26,14 @@ class PackageTest(unittest.TestCase):
             self.assertEqual(archives[0].read_bytes(), archives[1].read_bytes())
             with zipfile.ZipFile(archives[0]) as bundle:
                 names = set(bundle.namelist())
-                self.assertIn('SnowboardKidsRecompiled/assets/font.ttf', names)
+                self.assertIn('SnowboardKidsRecompiled/assets/LatoLatin-Regular.ttf', names)
                 self.assertIn('SnowboardKidsRecompiled/BUILD-INFO.txt', names)
                 self.assertNotIn('SnowboardKidsRecompiled/runtime-data', names)
                 manifest = bundle.read('SnowboardKidsRecompiled/BUILD-INFO.txt').decode('utf-8')
                 self.assertIn('Dependency-Lock-Digest:', manifest)
+                for source in (ROOT / 'assets/sbk-ui/icons').glob('*.svg'):
+                    self.assertEqual(bundle.read('SnowboardKidsRecompiled/assets/icons/' + source.name),
+                                     source.read_bytes())
 
     def test_public_package_rejects_license_blocker(self):
         with tempfile.TemporaryDirectory() as directory:

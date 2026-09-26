@@ -10,8 +10,7 @@ import zipfile
 from audit_release_artifact import audit
 
 ROOT = Path(__file__).resolve().parents[1]
-ASSET_SUFFIXES = {'.png', '.svg', '.ttf', '.rcss', '.txt'}
-EXCLUDED_ASSETS = {'board.svg', 'board-selected.svg', 'rock.png'}
+from stage_ui_assets import validate_assets
 
 
 def add(bundle, name, data, executable=False):
@@ -74,15 +73,12 @@ def main():
     if module_builder_dir.is_dir():
         for py_file in sorted(module_builder_dir.glob('*.py')):
             files.append((f'scripts/module_builder/{py_file.name}', py_file.read_bytes(), False))
-    for path in sorted(args.assets.rglob('*')):
-        if path.is_symlink():
-            parser.error(f'asset symlink refused: {path}')
-        if path.is_file():
-            if path.name in EXCLUDED_ASSETS:
-                continue
-            if path.suffix.lower() not in ASSET_SUFFIXES:
-                parser.error(f'unreviewed asset type: {path}')
-            files.append(('assets/' + path.relative_to(args.assets).as_posix(), path.read_bytes(), False))
+    try:
+        reviewed = validate_assets(args.assets, ROOT)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    for name, data in sorted(reviewed.items()):
+        files.append(('assets/' + name, data, False))
     for library in args.library:
         if not library.is_file() or library.is_symlink():
             parser.error(f'invalid shared library: {library}')
