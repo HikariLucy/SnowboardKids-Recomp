@@ -37,4 +37,43 @@ with tempfile.TemporaryDirectory(prefix='sbk-graphics-') as tmp:
  for idx,text in enumerate(['{', '[]','"hello"','null','42']):
   p=Path(tmp)/f'malformed{idx}';p.mkdir();(p/'graphics.json').write_text(text)
   j=run(p);assert j['ds_option']==0 and j['applied_rr']==0,j
+ # VSync: default On, persisted with every window mode, aspect and scale.
+ j=run(Path(tmp)/'defaults')
+ assert j['vsync']=='On' and j['applied_vsync']==0 and not j['hidden']['vsync'],j
+ for res in (0,4):
+  for aspect in range(2):
+   for wm in range(2):
+    for vs in range(2):
+     p=Path(tmp)/f'vsync-{res}-{aspect}-{wm}-{vs}'
+     a=run(p,'save',res,aspect,0,wm,vs); bval=run(p)
+     assert a==bval and bval['vsync']==['On','Off'][vs] and bval['applied_vsync']==vs,bval
+     assert bval['applied_wm']==wm and bval['applied_ar']==aspect and bval['res_option']==keys[res],bval
+     assert json.loads((p/'graphics.json').read_text())['vsync']==['On','Off'][vs]
+ # Process A: Off; process B: loads Off, sets On; process C: loads On.
+ p=Path(tmp)/'vsync-abc'
+ assert run(p,'save',2,0,0,0,1)['applied_vsync']==1
+ pb=run(p); assert pb['vsync']=='Off' and pb['applied_vsync']==1,pb
+ assert run(p,'save',2,0,0,0,0)['applied_vsync']==0
+ cval=run(p); assert cval['vsync']=='On' and cval['applied_vsync']==0,cval
+ # A window-mode toggle (F11 / Alt+Enter path) must not reset VSync.
+ for wm in range(2):
+  p=Path(tmp)/f'vsync-toggle-{wm}'
+  run(p,'save',2,1,0,wm,1); t=run(p,'toggle')
+  assert t['applied_wm']==1-wm and t['applied_vsync']==1 and t['vsync']=='Off' and t['ar_option']=='Expand',t
+ # Invalid VSync values fall back to On; an old high-FPS request stays Original.
+ for idx,value in enumerate([None,'maybe','',-1,2,4294967296,18446744073709551615,1.5,True,{},[],'OFF ','Adaptive','Mailbox']):
+  p=Path(tmp)/f'vsync-bad{idx}';p.mkdir()
+  (p/'graphics.json').write_text(json.dumps({'vsync':value,'rr_option':'Display','rr_manual_value':240,'wm_option':'Fullscreen'}))
+  j=run(p); assert j['vsync']=='On' and j['applied_vsync']==0,(value,j)
+  assert j['rr_option']=='Original' and j['applied_rr']==0 and j['applied_wm']==1,(value,j)
+ p=Path(tmp)/'vsync-missing';p.mkdir()
+ (p/'graphics.json').write_text(json.dumps({'res_option':'1080p','ar_option':'Expand','rr_option':'Manual'}))
+ j=run(p); assert j['vsync']=='On' and j['applied_vsync']==0 and j['applied_rr']==0 and j['res_option']=='1080p',j
+ # Capability gating: Off is disabled (On never) when the swap chain cannot present unsynchronized.
+ p=Path(tmp)/'vsync-caps';p.mkdir()
+ proc=subprocess.run([str(b),'caps'],env={**os.environ,'SBK_CONFIG_TEST_DIR':str(p)},text=True,capture_output=True)
+ assert proc.returncode==0,proc.stderr
+ caps=json.loads(proc.stdout)
+ assert caps['off_disabled']==1 and caps['on_disabled']==0 and caps['details'] and caps['off_disabled_after']==0 and caps['details_after']=='',caps
  print('PASS graphics config: process A/B 42 combinations, malformed values, original timing, backend bound')
+ print('PASS vsync: default On, 16 window/aspect/scale combinations, A/B/C persistence, toggle keeps VSync, 15 invalid values, capability gating')
