@@ -47,6 +47,24 @@ driver support presenting without waiting for the display; otherwise it is
 greyed out. Changes apply immediately with **Apply**. VSync does not change
 the game's speed or timing.
 
+### Controls, Audio, and Accessibility
+
+Open the overlay with **Escape** or a controller's Back button. Controls edits
+an assigned input profile; bindings and player assignments are saved to
+`controls.json` in user data when leaving Controls. Reset asks for confirmation
+with **Cancel** focused by default.
+
+Audio exposes mixed-stream **Master Volume**. Zero percent mutes host output;
+the game's own audio processing continues. Accessibility offers **Reduced
+Motion** for menu decoration and smooth scrolling. The settings persist in
+`sound.json` and `accessibility.json` in user data. Both tabs can be operated
+with keyboard or controller navigation. UI scale and separate Music/SFX controls
+are not offered.
+
+For local diagnosis, `SBK_UX_TRACE=1` prints UI state changes to stderr. It is
+silent by default. Physical-controller behavior depends on the attached device
+and has not been validated by the virtual-controller tests.
+
 ---
 
 ## 3. Host Requirements

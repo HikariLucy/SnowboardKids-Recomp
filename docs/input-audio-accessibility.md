@@ -2,7 +2,7 @@
 
 ## Controls
 
-The Controls tab initially shows the single-player **controller** profile. Use the controller/keyboard toggle in its footer before selecting a binding when remapping a keyboard key. To bind `P` to the second D-Pad Right slot, select keyboard, focus that slot, activate capture, then press `P`. The capture consumes the key. A controller press or axis motion from another device does not navigate the frontend while capture is active; release events still pass through to clear held navigation state. Escape cancels capture.
+The Controls tab displays the current player assignment. In the LIVE four-player view, Player 1 was assigned **Keyboard (SP)**; Edit Profile opened that keyboard profile. In single-player view, use the controller/keyboard footer toggle to select keyboard before remapping. To bind `P` to the second D-Pad Right slot, select keyboard, focus that slot, activate capture, then press `P`. The capture consumes the key. A controller press or axis motion from another device does not navigate the frontend while capture is active; release events still pass through to clear held navigation state. Escape cancels capture.
 
 Bindings are saved to `controls.json` in user data when the Controls tab closes or changes. The persisted enum keys and guest button semantics are unchanged. Reset to defaults opens a confirmation with **Cancel** focused. Enter immediately cancels; reset requires an explicit selection of Reset.
 
@@ -18,4 +18,4 @@ The approved theme is retained. Focus has a visible border and shape or size cue
 
 ## Verification
 
-The Linux CTest suite includes `input_capture_events`, `audio_host_gain`, `compat_audio_progress`, `ui_ux_config`, graphics configuration, first-run layout, PFS, and quiescence tests. `ui_ux_config` verifies process A save to process B reload and malformed-file fallback under ASan/UBSan. Physical controller behavior and the Model D race overlay flow remain separate live gates.
+The Linux CTest suite includes `input_capture_events`, `audio_host_gain`, `compat_audio_progress`, `ui_ux_config`, graphics configuration, first-run layout, PFS, and quiescence tests. `ui_ux_config` verifies process A save to process B reload and malformed-file fallback under ASan/UBSan. Model D race overlay validation passed for keyboard remap, process-B reload, reset, host volume, reduced-motion persistence, mouse navigation, keyboard navigation, and virtual SDL controller navigation. Guest-button response to the remapped key and physical-controller behavior remain separate gates. See `INPUT-CAPABILITIES.md`, `AUDIO-CAPABILITIES.md`, and `ACCESSIBILITY.md`.

@@ -85,8 +85,10 @@ Screenshots are not committed.
 
 ## Known limitations
 
-- Focused option text in settings lists uses the slope-blue accent with an
-  underline; it is readable but subtle. Pending human review.
+- Focus now uses a thick border plus filled highlight, while selected tabs and
+  options have an underline or weight cue. LIVE screenshots were captured for
+  Controls, Audio, Accessibility, Reset, and binding capture. Aesthetic judgment
+  remains pending human review.
 - In `--frontend-preview` only, the launcher's version label sits under the
   overlay's “Close” prompt at the bottom-left. The launcher is not shown in game.
 - Fredoka renders at the variable font's default (light) instance inside
@@ -95,3 +97,12 @@ Screenshots are not committed.
   ASan/UBSan with LeakSanitizer on in this branch's environment. Where ptrace
   is restricted, LSan must be disabled (`ASAN_OPTIONS=detect_leaks=0`) and
   reported as not run.
+
+## UX LIVE validation
+
+With `SBK_UX_TRACE=1`, the Model D race overlay logged tab, focus, profile,
+binding capture, reset, host gain, reduced-motion, and overlay transitions.
+The flag is silent by default and does not log each frame. The reset prompt
+explicitly focuses its requested default even when opened by mouse; this was
+verified with immediate Enter on Cancel and deliberate focus on Reset. See the
+three capability documents for run evidence and limits.
