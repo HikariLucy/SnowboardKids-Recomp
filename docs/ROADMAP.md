@@ -2,6 +2,85 @@
 
 This roadmap is intentionally milestone-driven. Dates are estimates only; technical blockers take priority over calendar targets.
 
+
+## Finalization and public-release plan
+
+Approximate project status: **~96%**.
+
+The repository remains private while the current playability objectives are being closed. The first public release is **not** intended to wait for every planned enhancement. The publication gate is a reliable, understandable, playable PC port that another user can set up from their own supported ROM without access to the development environment.
+
+### First public playable release — required
+
+The repository may be made public once the current objectives below are closed:
+
+- [ ] Finish the current Controls / Audio / Accessibility live-validation gates
+- [ ] Complete a full race through finish/results/return without a progression blocker
+- [ ] Validate the original Controller Pak save flow live: create/progress/restart/load
+- [ ] Validate the basic physical-controller path on real hardware
+- [x] Keep Model D first-run generation working from the user's own supported ROM
+- [x] Keep the distributed engine artifact ROM-free and game-module-free
+- [x] Keep Linux and Windows ROM-free CI green
+- [x] Keep savestates and Controller Pak persistence working cross-process
+- [x] Keep graphics, VSync, input configuration, host volume and accessibility configuration persistent
+- [ ] Resolve the remaining release/license blockers before distributing binaries
+- [ ] Finish public-facing setup/troubleshooting documentation and supported-ROM instructions
+- [ ] Produce and audit the first public beta artifact
+
+The first public version should be presented as a **beta / pre-release**, not as a claim that every enhancement in this roadmap is complete.
+
+### Supported ROM policy for the first public release
+
+The initial public build should support the single, explicitly validated Snowboard Kids (USA) corpus used by the project. The builder may accept `.z64`, `.v64` or `.n64` byte-order variants when normalization yields that same supported dump.
+
+Do **not** accept arbitrary ROMs solely because their game ID matches. Additional revisions or regions require their own verified corpus/configuration and compatibility evidence.
+
+### Performance conclusions and optimization plan
+
+Current evidence is positive but is not yet a formal hardware benchmark:
+
+- [x] Guest timing remains at the original 60.000 Hz VI rate in validated live runs
+- [x] Repeated race-active and overlay/settings runs complete with zero recompiler fallbacks
+- [x] Test harness shutdowns have repeatedly left zero residual game processes
+- [x] High internal resolution (including the validated 4.5x case) remains stable on the current Linux/NVIDIA test machine
+- [x] The previous audio FIFO bug capable of causing an enormous host allocation was fixed by preserving N64 AI FIFO semantics
+- [x] ASan/UBSan-backed suites cover important persistence/input/audio paths
+- [ ] Record a formal CPU/RAM/GPU/VRAM/frame-time baseline before declaring 1.0 performance targets
+
+The project must **measure before optimizing**. The lack of a formal CPU/RAM/GPU benchmark does not block the first playable public beta unless a real performance regression is found.
+
+Planned `PERFORMANCE-PROFILING-P1` should measure representative menu/race/overlay scenarios at multiple internal resolutions and record:
+
+- CPU average/peak
+- resident memory (RSS)
+- GPU utilization and VRAM where available
+- CPU/GPU frame time
+- presentation time
+- audio queue behavior
+- long-session memory/thread/file-descriptor stability
+
+### Post-public versions
+
+The following work is intentionally **not required to publish the first playable repository**. It belongs to later releases unless a dependency is discovered during the current closure work:
+
+- True widescreen / ultrawide rather than simple Expand
+- High-framerate feasibility and, only if safe, higher-FPS modes
+- Mod hooks, mod packaging and public mod templates
+- Extended performance optimization after profiling
+- Additional Snowboard Kids ROM revisions/regions
+- Further accessibility and controller polish
+- Additional physical multiplayer validation and convenience features
+- Broader release packaging and distribution formats
+- Android ARM64/Vulkan investigation and port
+- Android/mobile controller and touch-control UX
+- PC ↔ Android save portability if the module/corpus compatibility model permits it
+
+### Android direction
+
+Android is a planned future platform, not a blocker for the PC public release. The preferred eventual target is **Android ARM64 + Vulkan**, reusing the Model D engine/game-module ABI where practical. A mobile release will need a dedicated ROM-selection flow, ARM64 module-generation strategy, storage integration and mobile input UX.
+
+PC remains the reference platform until the first public playable release is stable.
+
+
 ## M0 — Reproducible matching decomp
 
 Status: **Complete**
