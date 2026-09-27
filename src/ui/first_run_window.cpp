@@ -459,7 +459,8 @@ Outcome run(const Host& host) {
                 case SDL_CONTROLLER_BUTTON_DPAD_LEFT: case SDL_CONTROLLER_BUTTON_DPAD_UP: move(-1); break;
                 case SDL_CONTROLLER_BUTTON_DPAD_RIGHT: case SDL_CONTROLLER_BUTTON_DPAD_DOWN: move(1); break;
                 case SDL_CONTROLLER_BUTTON_A: if (v.button_count) activate(v.buttons[v.focus]); break;
-                case SDL_CONTROLLER_BUTTON_B: back(); break;
+                // B, or X (the N64 B position), like Menu Back in the options overlay.
+                case SDL_CONTROLLER_BUTTON_B: case SDL_CONTROLLER_BUTTON_X: back(); break;
                 }
                 break;
             case SDL_CONTROLLERAXISMOTION:

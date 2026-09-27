@@ -19,8 +19,9 @@ int main() {
     const auto disabled = sbk::frontend::config_tabs("", false);
     check(!sbk::frontend::mods_available("", false), "no mod_game_id: mods unavailable");
     check(!has(disabled, ConfigTab::Mods), "no mod_game_id: Mods tab absent, so no ModMenu can be built");
-    check(disabled == std::vector<ConfigTab>{ConfigTab::General, ConfigTab::Graphics, ConfigTab::Controls, ConfigTab::Sound},
-          "General, Graphics, Controls and Sound tabs still registered in order");
+    check(disabled == std::vector<ConfigTab>{ConfigTab::General, ConfigTab::Graphics, ConfigTab::Controls, ConfigTab::Sound,
+                                             ConfigTab::Accessibility},
+          "General, Graphics, Controls, Sound and Accessibility tabs still registered in order");
 
     check(!has(sbk::frontend::config_tabs("", true), ConfigTab::Mods), "initialized subsystem without ID: tab absent");
 
@@ -30,7 +31,7 @@ int main() {
 
     const auto enabled = sbk::frontend::config_tabs("fixture-game", true);
     check(sbk::frontend::mods_available("fixture-game", true), "fixture mod_game_id and initialized mods: available");
-    check(enabled.size() == 5 && enabled.back() == ConfigTab::Mods, "initialized fixture: Mods tab registered after the others");
+    check(enabled.size() == 6 && enabled.back() == ConfigTab::Mods, "initialized fixture: Mods tab registered after the others");
     std::printf("%s frontend config tabs (%d failure%s)\n", failures ? "FAIL" : "PASS", failures, failures == 1 ? "" : "s");
     return failures ? 1 : 0;
 }

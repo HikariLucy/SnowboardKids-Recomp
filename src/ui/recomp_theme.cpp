@@ -111,7 +111,8 @@ void apply() {
     theme.modal.body.set_color(ink);
     theme.modal.tabs.emplace();
     auto& tabs = *theme.modal.tabs;
-    tabs.normal.set_color(ink);
+    // Unselected tabs are dimmed (5.9:1 on snow); selected and focused use ink.
+    tabs.normal.set_color(disabled);
     tabs.normal.set_font_family("Fredoka");
     tabs.hover.set_color(ink);
     tabs.hover.set_background_color(ice);
@@ -120,6 +121,11 @@ void apply() {
     tabs.pulsing.set_color(ink);
     tabs.pulsing.set_background_color(ice);
     tabs.focus_text_color = ink; // readable on sun (selected) and ice (focused)
+    // Focused tab also gets an ink bar on top (selected has the bar below), so
+    // focus and selection differ by shape, not only by ice vs sun.
+    tabs.normal.set_border_top_width(4.0f);
+    tabs.normal.set_border_top_color(Color{0, 0, 0, 0});
+    tabs.pulsing.set_border_top_color(ink);
     tabs.indicator.set_height(4.0f);
     tabs.indicator_color = ink;
 
@@ -132,6 +138,46 @@ void apply() {
     theme.prompt.secondary_button.emplace();
     interactive(*theme.prompt.secondary_button);
     interactive(theme.controls.binding_button);
+
+    // Settings options: selected = bold ink + underline; focused = sun block
+    // with an ink bar on the left. Neither state relies on color alone, and
+    // focus is steady (no pulse).
+    auto& radio = theme.radio.emplace();
+    radio.normal.set_background_color(Color{0, 0, 0, 0});
+    radio.normal.set_border_color(Color{0, 0, 0, 0});
+    radio.normal.set_border_left_width(6.0f);
+    radio.normal.set_padding_left(6.0f);
+    radio.normal.set_padding_right(6.0f);
+    radio.normal.set_font_weight(400);
+    radio.checked.set_color(ink);
+    radio.checked.set_border_color(Color{0, 0, 0, 0}); // upstream greys every side
+    radio.checked.set_border_bottom_color(ink);
+    radio.checked.set_font_weight(700);
+    radio.focus.set_color(ink);
+    radio.focus.set_background_color(sun);
+    radio.focus.set_border_left_color(ink);
+    radio.focus.set_border_bottom_color(ink);
+    // Sliders: a visible slope track; the focused thumb grows into a sun
+    // square with a thick ink border (size + border, not color alone).
+    auto& slider = theme.slider.emplace();
+    slider.bar.set_height(4.0f);
+    slider.bar.set_background_color(slope);
+    auto thumb = [&](Style& style, float size, Color fill, float border) {
+        const float total = size + 2.0f * border;
+        style.set_width(size);
+        style.set_height(size);
+        style.set_margin_top(-(total - 4.0f) / 2.0f);
+        style.set_margin_left(-total / 2.0f);
+        style.set_margin_right(-total / 2.0f);
+        style.set_border_width(border);
+        style.set_border_color(ink);
+        style.set_border_radius(4.0f);
+        style.set_background_color(fill);
+    };
+    thumb(slider.thumb, 14.0f, ink, 3.0f);
+    thumb(slider.thumb_focus, 20.0f, sun, 4.0f);
+    thumb(slider.thumb_disabled, 14.0f, disabled_bg, 3.0f);
+    slider.thumb_disabled.set_border_color(disabled);
     theme.controls.input_device_toggle = t::TogglePreset::Filled;
 
     auto& assignment = theme.in_game_player_assignment;

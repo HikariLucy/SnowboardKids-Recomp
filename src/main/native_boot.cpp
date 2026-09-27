@@ -40,6 +40,7 @@
 #include "librecomp/game.hpp"
 #include "librecomp/rsp.hpp"
 #include "recompinput/input_events.h"
+#include "recompinput/input_mapping.h"
 #include "recompinput/input_state.h"
 #include "recompinput/players.h"
 #include "recompinput/profiles.h"
@@ -50,6 +51,9 @@
 #include "util/file.h"
 #include "recomp_theme.h"
 #include "ui/menu.hpp"
+#include "ui/ux_settings.hpp"
+#include "ui/input_names.hpp"
+#include "host_gain.hpp"
 #include "ui/first_run_window.hpp"
 #include "ultramodern/ultramodern.hpp"
 #include "ultramodern/config.hpp"
@@ -166,6 +170,11 @@ void install_crash_handlers() {
 
 void initialize_controls(const std::filesystem::path& runtime_dir) {
     const std::filesystem::path controls_path = runtime_dir / "controls.json";
+    // Menu Back on B as well as X (X sits where the N64 B button is), matching
+    // first-run setup. Defaults only: saved bindings are loaded unchanged.
+    recompinput::set_default_mapping_for_controller(recompinput::GameInput::BACK_MENU, {
+        recompinput::InputField::controller_digital(recompinput::SDL_CONTROLLER_BUTTON_WEST),
+        recompinput::InputField::controller_digital(recompinput::SDL_CONTROLLER_BUTTON_EAST)});
     const bool loaded_existing =
         recompinput::profiles::load_controls_config(controls_path);
 
@@ -217,8 +226,16 @@ void init_frontend_config(const recomp::GameEntry& game, bool mods_initialized) 
                 recompui::config::create_graphics_tab();
                 apply_resolution_override();
                 break;
-            case sbk::frontend::ConfigTab::Controls: recompui::config::create_controls_tab(); break;
-            case sbk::frontend::ConfigTab::Sound: recompui::config::create_sound_tab("Audio"); break;
+            case sbk::frontend::ConfigTab::Controls:
+                sbk::input_names::apply([](recompinput::GameInput input, const char* name) {
+                    recompinput::set_game_input_name(input, name);
+                });
+                recompui::config::create_controls_tab();
+                break;
+            case sbk::frontend::ConfigTab::Sound:
+                sbk::ux::bind_master_volume(recompui::config::create_sound_tab("Audio"));
+                break;
+            case sbk::frontend::ConfigTab::Accessibility: sbk::ux::create_accessibility_tab(); break;
             case sbk::frontend::ConfigTab::Mods:
                 // ModMenu requires the game mod id before the tab can build it.
                 recompui::update_game_mod_id(game.mod_game_id);
@@ -466,7 +483,12 @@ void queue_samples(int16_t* audio_data, size_t sample_count) {
     float* samples_to_queue =
         swap_buffer.data() + output_channels * discarded_output_frames / 2;
 
-    const bool queued = SDL_QueueAudio(audio_device, samples_to_queue, bytes_to_queue) == 0;
+    // Master Volume: host gain on the final output only. Byte counts, and so the
+    // guest-visible AI FIFO accounting, are unchanged; the savestate mirror
+    // below keeps the unity-gain samples.
+    static std::vector<float> gain_buffer;
+    const void* output = sbk::host_gain::scaled(samples_to_queue, bytes_to_queue, sbk::ux::master_gain(), gain_buffer);
+    const bool queued = SDL_QueueAudio(audio_device, output, bytes_to_queue) == 0;
 #ifdef SBK_CONTINUATIONS
     // Mirror only what SDL accepted, so the ledger never runs ahead of the queue.
     if (queued) audio_boundary.submitted(reinterpret_cast<const uint8_t*>(samples_to_queue), bytes_to_queue);
@@ -498,7 +520,10 @@ bool install_host_audio(const sbk::savestate::AudioState& state, std::string& er
         [] { return SDL_GetQueuedAudioSize(audio_device); },
         [] { SDL_ClearQueuedAudio(audio_device); },
         [](const uint8_t* data, uint32_t size, std::string& why) {
-            if (SDL_QueueAudio(audio_device, data, size) == 0) return true;
+            // The saved backlog is at unity gain; play it at the current volume.
+            std::vector<float> gain_buffer;
+            const void* output = sbk::host_gain::scaled(data, size, sbk::ux::master_gain(), gain_buffer);
+            if (SDL_QueueAudio(audio_device, output, size) == 0) return true;
             why = SDL_GetError();
             return false;
         }};

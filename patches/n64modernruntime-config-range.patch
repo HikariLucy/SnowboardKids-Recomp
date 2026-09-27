@@ -1,0 +1,34 @@
+diff --git a/librecomp/src/config.cpp b/librecomp/src/config.cpp
+index 89e791c..43dc584 100644
+--- a/librecomp/src/config.cpp
++++ b/librecomp/src/config.cpp
+@@ -1,3 +1,4 @@
++#include <cmath>
+ #include <fstream>
+ #include "librecomp/files.hpp"
+ #include "librecomp/config.hpp"
+@@ -486,11 +487,21 @@ ConfigValueVariant Config::parse_config_option_json_value(const nlohmann::json&
+                 return std::get<ConfigOptionEnum>(option.variant).default_value;
+             }
+         }
+-        case ConfigOptionType::Number:
++        case ConfigOptionType::Number: {
++            const auto &option_number = std::get<ConfigOptionNumber>(option.variant);
+             if (is_null || !json_value.is_number()) {
+-                return std::get<ConfigOptionNumber>(option.variant).default_value;
++                return option_number.default_value;
+             }
+-            return json_value.get<double>();
++            // A hand-edited or corrupt file must not push a value outside the
++            // range the UI offers (e.g. a negative volume or deadzone).
++            const double value = json_value.get<double>();
++            if (!std::isfinite(value) ||
++                (option_number.max > option_number.min &&
++                 (value < option_number.min || value > option_number.max))) {
++                return option_number.default_value;
++            }
++            return value;
++        }
+         case ConfigOptionType::String:
+             if (is_null || !json_value.is_string()) {
+                 return std::get<ConfigOptionString>(option.variant).default_value;

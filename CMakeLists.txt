@@ -72,6 +72,9 @@ if(SBK_ROM_FREE_CI)
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+    add_executable(SnowboardKidsHostGainTest tests/audio/host_gain.cpp)
+    target_include_directories(SnowboardKidsHostGainTest PRIVATE src)
+    add_test(NAME audio_host_gain COMMAND SnowboardKidsHostGainTest)
 
     add_library(SnowboardKidsSyntheticModule SHARED
         tests/module/synthetic_module.cpp
@@ -377,6 +380,9 @@ endif()
 option(SBK_BUILD_NATIVE_BOOT "Build the first graphical Snowboard Kids native boot executable" OFF)
 
 if(SBK_BUILD_NATIVE_BOOT)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+    endif()
     if(NOT SBK_BUILD_RENDERER_STACK)
         message(FATAL_ERROR "SBK_BUILD_NATIVE_BOOT requires SBK_BUILD_RENDERER_STACK=ON")
     endif()
@@ -393,6 +399,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/ux_settings.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/first_run_process.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/first_run_window.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
@@ -408,6 +415,7 @@ if(SBK_BUILD_NATIVE_BOOT)
         "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
         "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
+        "${CMAKE_SOURCE_DIR}/src/ui/ux_settings.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/first_run_process.cpp"
         "${CMAKE_SOURCE_DIR}/src/ui/first_run_window.cpp"
         ${SNOWBOARDKIDS_THEME_SOURCES}
@@ -418,6 +426,9 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_executable(SnowboardKidsAudioProgressTest tests/compat/audio_progress.cpp)
     target_include_directories(SnowboardKidsAudioProgressTest PRIVATE src)
     add_test(NAME compat_audio_progress COMMAND SnowboardKidsAudioProgressTest)
+    add_executable(SnowboardKidsHostGainTest tests/audio/host_gain.cpp)
+    target_include_directories(SnowboardKidsHostGainTest PRIVATE src)
+    add_test(NAME audio_host_gain COMMAND SnowboardKidsHostGainTest)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     sbk_add_controller_pak_test()
 
@@ -553,14 +564,22 @@ if(SBK_BUILD_NATIVE_BOOT)
     set_tests_properties(ui_first_run_layout PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
     add_test(NAME ui_graphics_config
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/graphics_config/run.py")
+    add_test(NAME ui_ux_config
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ux_config/run.py")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        add_test(NAME input_capture_events
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controls/run_capture_events.py")
+    endif()
 
-    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
-        add_custom_command(TARGET ${SBK_EXE} POST_BUILD
-            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/stage_ui_assets.py"
-                --out "$<TARGET_FILE_DIR:${SBK_EXE}>/assets"
-            COMMENT "Staging reviewed fonts and original SBK UI assets"
-        )
-    endforeach()
+    # Both executables share a build directory. Stage once so parallel links
+    # cannot replace the same assets directory at the same time.
+    add_custom_target(SnowboardKidsAssets
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/stage_ui_assets.py"
+            --out "${CMAKE_BINARY_DIR}/assets"
+        COMMENT "Staging reviewed fonts and original SBK UI assets"
+    )
+    add_dependencies(SnowboardKidsRecompiled SnowboardKidsAssets)
+    add_dependencies(SnowboardKidsEngine SnowboardKidsAssets)
 endif()
 
 # P2 coordinator remains inert unless SBK_P2_CYCLES is set at runtime.
