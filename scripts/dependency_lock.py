@@ -34,7 +34,7 @@ DEPENDENCIES = {
         ('recompfrontend-resolution.patch', 'recompfrontend-quiescence.patch',
          'recompfrontend-input.patch', 'recompfrontend-graphics-options.patch',
          'recompfrontend-theme-focus.patch', 'recompfrontend-vsync.patch',
-         'recompfrontend-ux-accessibility.patch')),
+         'recompfrontend-ux-accessibility.patch', 'recompfrontend-ux-trace.patch')),
     'theme': Dependency('.deps-renderer/recomp-theme',
         'https://github.com/cdlewis/snowboardkids-recomp-theme.git',
         '0cb9a83a263607fbc8ab6176a758a00726e237cc'),

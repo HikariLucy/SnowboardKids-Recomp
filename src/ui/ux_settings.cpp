@@ -2,6 +2,7 @@
 
 #include "main/host_gain.hpp"
 #include "librecomp/config.hpp"
+#include "recompinput/ux_trace.h"
 #include "recompui/config.h"
 #include "recompui/recompui.h"
 
@@ -22,6 +23,7 @@ void bind_master_volume(recomp::config::Config& sound) {
            recomp::config::OptionChangeContext) {
             if (const double* percent = std::get_if<double>(&value)) {
                 gain.store(sbk::host_gain::from_percent(*percent), std::memory_order_relaxed);
+                recompinput::ux_trace::log("AUDIO GAIN percent=%.0f gain=%.2f", *percent, master_gain());
             }
         });
 }
@@ -44,6 +46,7 @@ recomp::config::Config& create_accessibility_tab() {
            recomp::config::OptionChangeContext) {
             if (const uint32_t* mode = std::get_if<uint32_t>(&value)) {
                 recompui::set_reduced_motion(*mode == static_cast<uint32_t>(ReducedMotion::On));
+                recompinput::ux_trace::log("REDUCED_MOTION %s", *mode == static_cast<uint32_t>(ReducedMotion::On) ? "On" : "Off");
             }
         });
     return config;
