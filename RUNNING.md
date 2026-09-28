@@ -1,31 +1,38 @@
-# Running Snowboard Kids Recompiled (Model D Architecture)
+# Running Snowboard Kids Recompiled
 
-This distribution contains the standalone, ROM-free game engine (`SnowboardKidsEngine`).
-It contains **no ROM data**, **no commercial game assets**, and **no precompiled game modules**.
+The public beta archive contains `SnowboardKidsEngine`, reviewed frontend assets
+and a precompiled `SnowboardKidsGame` module. It contains **no ROM** and **no
+extracted commercial game assets**.
 
-You supply your own legally dumped **Snowboard Kids (USA)** ROM image (`.z64`, `.v64`, `.n64`).
-Supported ROM SHA-1: `1583bacc9046a360df8ea4d536942155247e154c`.
+You supply your own legally dumped **Snowboard Kids (USA)** ROM image
+(`.z64`, `.v64`, `.n64`). Supported normalized ROM SHA-1:
+`1583bacc9046a360df8ea4d536942155247e154c`.
 
 ---
 
-## 1. First-Run & Local Module Generation
+## 1. First run
 
-On first startup, the engine detects that no game module is installed:
-1. Run `./SnowboardKidsEngine`.
-2. A file selection dialog will prompt you to select your legal Snowboard Kids (USA) ROM. (Alternatively, pass the ROM directly on the command line: `./SnowboardKidsEngine /path/to/snowboardkids.z64`).
-3. The engine validates the ROM integrity and compiles the local dynamic game module (`SnowboardKidsGame.so` on Linux, `SnowboardKidsGame.dll` on Windows) into your user data directory (`~/.local/share/SnowboardKids/modules/snowboardkids-us/`).
-4. Once compiled and validated, the game starts automatically!
+1. Extract the release archive.
+2. Run `./SnowboardKidsEngine`.
+3. Select your own supported Snowboard Kids (USA) ROM when prompted.
+4. The engine validates the ROM and the bundled game module, then starts the game.
+5. The selected ROM path is remembered in your user-data directory.
 
-### CLI / Offline Builder
-You can also generate the game module ahead of time:
+The beta package does **not** require a compiler or a local recompilation step.
+
+### Module override / developer builder
+
+A module installed in user data takes precedence over the release-bundled
+module. Developers can rebuild one with:
+
 ```bash
 python3 scripts/build-game-module.py /path/to/snowboardkids.z64
 # or:
 ./SnowboardKidsEngine --build-module /path/to/snowboardkids.z64
 ```
 
-### Subsequent Launches
-On subsequent launches, the engine detects the installed game module in user data and loads it immediately **without rebuilding**.
+That development path requires the local builder inputs/toolchain documented in
+the repository. Normal beta users do not need it.
 
 ---
 
@@ -71,6 +78,7 @@ and has not been validated by the virtual-controller tests.
 
 - **Graphics**: Vulkan 1.2+ capable GPU and drivers.
 - **Audio / Input**: SDL2 runtime libraries.
-- **Local Module Builder**:
+- **Normal public-beta playback**: no compiler is required.
+- **Optional local module rebuilding**:
   - Python 3.8+
   - C++20 compiler (`clang++` or `g++` on Linux; Visual Studio C++ / `clang-cl` on Windows).
