@@ -77,6 +77,27 @@ gpr get_entrypoint_address() {
 }
 
 static bool frontend_preview = false;
+
+static std::filesystem::path default_user_data_dir() {
+#if defined(_WIN32)
+    if (const char* appdata = std::getenv("APPDATA"); appdata && *appdata) {
+        return std::filesystem::path(appdata) / "SnowboardKids";
+    }
+#elif defined(__APPLE__)
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return std::filesystem::path(home) / "Library" / "Application Support" / "SnowboardKids";
+    }
+#else
+    if (const char* xdg_data = std::getenv("XDG_DATA_HOME"); xdg_data && *xdg_data) {
+        return std::filesystem::path(xdg_data) / "SnowboardKids";
+    }
+    if (const char* home = std::getenv("HOME"); home && *home) {
+        return std::filesystem::path(home) / ".local" / "share" / "SnowboardKids";
+    }
+#endif
+    return recompui::file::get_app_folder_path();
+}
+
 void traced_entrypoint(uint8_t* rdram, recomp_context* ctx);
 
 // RecompFrontend expects these program-owned globals.
@@ -804,7 +825,7 @@ int main(int argc, char** argv) {
                std::filesystem::exists(install_dir / "runtime-data")) {
         runtime_dir = install_dir / "runtime-data"; // existing developer layout
     } else {
-        runtime_dir = recompui::file::get_app_folder_path();
+        runtime_dir = default_user_data_dir();
     }
     if (runtime_dir.empty()) {
         std::fprintf(stderr, "Cannot determine a writable user data directory. Set SBK_USER_DATA_DIR.\n");
