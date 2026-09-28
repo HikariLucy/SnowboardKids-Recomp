@@ -17,6 +17,8 @@ class ArtifactAuditTest(unittest.TestCase):
                 'SnowboardKidsRecompiled/BUILD-INFO.txt': b'Project: Snowboard Kids Recompiled\nVersion: 0.1.0\nCommit: e430e84c8bad\nPlatform: linux\nArchitecture: x86_64\n',
                 'SnowboardKidsRecompiled/RUNNING.md': b'Run it',
                 'SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md': b'Notices',
+                'SnowboardKidsRecompiled/LICENSE': b'GPLv3',
+                'SnowboardKidsRecompiled/SOURCE-COMPLIANCE.md': b'Source directions',
             }
             entries.update(extra)
             with zipfile.ZipFile(archive, 'w') as bundle:
@@ -38,6 +40,8 @@ class ArtifactAuditTest(unittest.TestCase):
                 bundle.writestr('SnowboardKidsRecompiled/SnowboardKidsRecompiled', b'ELF safe')
                 bundle.writestr('SnowboardKidsRecompiled/RUNNING.md', b'Run it')
                 bundle.writestr('SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md', b'Notices')
+                bundle.writestr('SnowboardKidsRecompiled/LICENSE', b'GPLv3')
+                bundle.writestr('SnowboardKidsRecompiled/SOURCE-COMPLIANCE.md', b'Source directions')
             result = audit(archive)
             self.assertTrue(any('missing build manifest' in error for error in result))
 
@@ -52,6 +56,11 @@ class ArtifactAuditTest(unittest.TestCase):
     def test_developer_path_and_build_junk(self):
         self.check({'SnowboardKidsRecompiled/SnowboardKidsRecompiled': b'/home/alice/build'}, 'personal absolute path')
         self.check({'SnowboardKidsRecompiled/build.ninja': b'X'}, 'forbidden file')
+
+    def test_game_module_only_allowed_at_canonical_path(self):
+        self.check({'SnowboardKidsRecompiled/modules/snowboardkids-us/SnowboardKidsGame.so': b'module'})
+        self.check({'SnowboardKidsRecompiled/SnowboardKidsGame.so': b'module'},
+                   'game module outside canonical release path')
 
     def test_traversal(self):
         self.check({'SnowboardKidsRecompiled/../bad': b'X'}, 'unsafe layout')
