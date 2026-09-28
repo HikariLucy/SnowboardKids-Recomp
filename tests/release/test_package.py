@@ -35,18 +35,38 @@ class PackageTest(unittest.TestCase):
                     self.assertEqual(bundle.read('SnowboardKidsRecompiled/assets/icons/' + source.name),
                                      source.read_bytes())
 
-    def test_public_package_rejects_license_blocker(self):
+    def test_public_beta_requires_module_and_packages_it_canonically(self):
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
-            binary = temp / 'SnowboardKidsRecompiled'
-            binary.write_bytes(b'synthetic')
+            binary = temp / 'SnowboardKidsEngine'
+            binary.write_bytes(b'ELF synthetic engine')
+            module = temp / 'SnowboardKidsGame.so'
+            module.write_bytes(b'synthetic game module')
             assets = temp / 'assets'
-            assets.mkdir()
-            result = subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'),
-                                     '--binary', str(binary), '--assets', str(assets),
-                                     '--out', str(temp / 'release.zip')], capture_output=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertFalse((temp / 'release.zip').exists())
+            subprocess.run([sys.executable, str(ROOT / 'scripts/stage_ui_assets.py'),
+                            '--out', str(assets)], check=True)
+
+            missing = subprocess.run([
+                sys.executable, str(ROOT / 'scripts/package_release.py'),
+                '--binary', str(binary), '--assets', str(assets),
+                '--out', str(temp / 'missing.zip'), '--public-beta',
+            ], capture_output=True, text=True)
+            self.assertNotEqual(missing.returncode, 0)
+            self.assertIn('--public-beta requires --game-module', missing.stderr)
+
+            archive = temp / 'release.zip'
+            subprocess.run([
+                sys.executable, str(ROOT / 'scripts/package_release.py'),
+                '--binary', str(binary), '--assets', str(assets),
+                '--game-module', str(module), '--public-beta',
+                '--version', '0.9.0-beta', '--out', str(archive),
+            ], check=True)
+            with zipfile.ZipFile(archive) as bundle:
+                names = set(bundle.namelist())
+                self.assertIn('SnowboardKidsRecompiled/modules/snowboardkids-us/SnowboardKidsGame.so', names)
+                self.assertIn('SnowboardKidsRecompiled/LICENSE', names)
+                self.assertIn('SnowboardKidsRecompiled/SOURCE-COMPLIANCE.md', names)
+                self.assertIn('SnowboardKidsRecompiled/BETA-DISTRIBUTION-POLICY.md', names)
 
 
 if __name__ == '__main__':
