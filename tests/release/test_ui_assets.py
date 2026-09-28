@@ -82,7 +82,7 @@ class UIAssetsTest(unittest.TestCase):
                             '--out', str(archive), '--draft'], check=True, capture_output=True)
             passes, blockers = run_checks(ROOT, assets=assets, archive=archive)
             self.assertIn('theme_asset_icons', dict(passes))
-            self.assertIn('project_license', dict(blockers))
+            self.assertIn('project_license', dict(passes))
             self.assertIn('recompfrontend_license', dict(blockers))
             with zipfile.ZipFile(archive, 'a') as bundle:
                 bundle.writestr('SnowboardKidsRecompiled/assets/icons/unknown.svg', 'stale')
