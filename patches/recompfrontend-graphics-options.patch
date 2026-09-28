@@ -1,0 +1,113 @@
+diff --git a/recompui/include/recompui/resolution.h b/recompui/include/recompui/resolution.h
+index 0414ee3..4435f28 100644
+--- a/recompui/include/recompui/resolution.h
++++ b/recompui/include/recompui/resolution.h
+@@ -41,8 +41,10 @@ namespace recompui::resolution {
+     inline Scale scale(Resolution value, int downsample) {
+         // Preserve supersampling for old configs. Explicit HD presets always
+         // use their stated internal scale, even if a saved ds_option is active.
++        // Only reviewed factors reach GPU allocation; anything else renders 1:1.
++        const int requested = (downsample == 2 || downsample == 4) ? downsample : 1;
+         const int ds = (value == Resolution::Original || value == Resolution::Original2x)
+-            ? std::max(downsample, 1) : 1;
++            ? requested : 1;
+         for (const auto& preset : presets) {
+             if (preset.value == value) {
+                 return {preset.multiplier * ds, ds};
+diff --git a/recompui/src/config/ui_config_tab_graphics.cpp b/recompui/src/config/ui_config_tab_graphics.cpp
+index 9f4b3f0..40e0fe4 100644
+--- a/recompui/src/config/ui_config_tab_graphics.cpp
++++ b/recompui/src/config/ui_config_tab_graphics.cpp
+@@ -35,7 +35,12 @@ namespace recompui {
+ 
+         static EnumOptionVector window_mode_options = {
+             {ultramodern::renderer::WindowMode::Windowed, "Windowed"},
++        #if defined(__APPLE__)
+             {ultramodern::renderer::WindowMode::Fullscreen, "Fullscreen"}
++        #else
++            // SDL_WINDOW_FULLSCREEN_DESKTOP / monitor-sized window, not exclusive mode.
++            {ultramodern::renderer::WindowMode::Fullscreen, "Fullscreen", "Borderless Fullscreen"}
++        #endif
+         };
+ 
+         #if defined(_WIN32)
+@@ -62,8 +67,8 @@ namespace recompui {
+         };
+ 
+         static EnumOptionVector aspect_ratio_options = {
+-            {ultramodern::renderer::AspectRatio::Original, "Original"},
+-            {ultramodern::renderer::AspectRatio::Expand, "Expand"},
++            {ultramodern::renderer::AspectRatio::Original, "Original", "Original 4:3"},
++            {ultramodern::renderer::AspectRatio::Expand, "Expand", "Expand to window"},
+             // {ultramodern::renderer::AspectRatio::Manual, "Manual"},
+         };
+ 
+@@ -168,9 +173,11 @@ namespace recompui {
+             new_config.api_option = get_graphics_enum_value<ultramodern::renderer::GraphicsApi>(graphics::options::api_option);
+             new_config.ar_option = get_graphics_enum_value<ultramodern::renderer::AspectRatio>(graphics::options::ar_option);
+             new_config.msaa_option = get_graphics_enum_value<ultramodern::renderer::Antialiasing>(graphics::options::msaa_option);
+-            new_config.rr_option = get_graphics_enum_value<ultramodern::renderer::RefreshRate>(graphics::options::rr_option);
++            // High framerate output is unvalidated for this game: always present at
++            // the original rate, whatever an older config file requested.
++            new_config.rr_option = ultramodern::renderer::RefreshRate::Original;
+             new_config.hpfb_option = get_graphics_enum_value<ultramodern::renderer::HighPrecisionFramebuffer>(graphics::options::hpfb_option);
+-            new_config.rr_manual_value = get_graphics_number_value<int>(graphics::options::rr_manual_value);
++            new_config.rr_manual_value = 60;
+ 
+             new_config.ds_option = get_graphics_enum_value<int>(graphics::options::ds_option);
+ 
+@@ -231,7 +238,7 @@ namespace recompui {
+ 
+             config.add_enum_option(
+                 graphics::options::res_option,
+-                "Resolution",
++                "Internal Resolution",
+                 "Sets the internal rendering resolution without changing the aspect ratio. With downsampling off: Original is 320x240 (1x), 480p is 640x480 (2x), 720p-class is 960x720 (3x), 1080p-class is 1440x1080 (4.5x), 1440p-class is 1920x1440 (6x), and 2160p/4K-class is 2880x2160 (9x). Auto uses window-dependent integer scaling. Higher resolutions increase GPU load.",
+                 resolution_options,
+                 ultramodern::renderer::Resolution::Auto
+@@ -276,7 +283,14 @@ namespace recompui {
+                 );
+     
+                 config.on_json_parse_option(graphics::options::ds_option, [](const nlohmann::json& j) {
+-                    return j.get<uint32_t>();
++                    // Reject every value outside the listed choices before it can size buffers.
++                    if (j.is_number_unsigned()) {
++                        const auto value = j.get<uint64_t>();
++                        if (value == 2 || value == 4) {
++                            return recomp::config::ConfigValueVariant{static_cast<uint32_t>(value)};
++                        }
++                    }
++                    return recomp::config::ConfigValueVariant{static_cast<uint32_t>(DownsamplingOption::Off)};
+                 });
+     
+                 config.on_json_serialize_option(graphics::options::ds_option, [](const recomp::config::ConfigValueVariant& value) {
+@@ -295,7 +309,7 @@ namespace recompui {
+             config.add_enum_option(
+                 graphics::options::wm_option,
+                 "Window Mode",
+-                "Sets whether the game should display <recomp-color primary>Windowed</recomp-color> or <recomp-color primary>Fullscreen</recomp-color>. You can also use <recomp-color primary>F11</recomp-color> or <recomp-color primary>Alt + Enter</recomp-color> to toggle this option.",
++                "Sets whether the game should display in a window or fill the current display. Fullscreen is borderless: it keeps the desktop display mode. You can also use <recomp-color primary>F11</recomp-color> or <recomp-color primary>Alt + Enter</recomp-color> to toggle this option.",
+                 window_mode_options,
+                 wm_default()
+             );
+@@ -305,14 +319,18 @@ namespace recompui {
+                 "Framerate",
+                 get_framerate_text(60),
+                 refresh_rate_options,
+-                ultramodern::renderer::RefreshRate::Display
++                ultramodern::renderer::RefreshRate::Original,
++                true
+             );
++            config.on_json_parse_option(graphics::options::rr_option, [](const nlohmann::json&) {
++                return recomp::config::ConfigValueVariant{static_cast<uint32_t>(ultramodern::renderer::RefreshRate::Original)};
++            });
+ 
+             config.add_number_option(
+                 graphics::options::rr_manual_value,
+                 "",
+                 get_framerate_text(60),
+-                20.0, 240.0, 1.0, 0, false, 60.0
++                20.0, 240.0, 1.0, 0, false, 60.0, true
+             );
+             {
+                 config.add_option_hidden_dependency(

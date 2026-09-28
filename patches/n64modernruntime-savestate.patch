@@ -1,0 +1,635 @@
+--- a/librecomp/include/librecomp/overlays.hpp
++++ b/librecomp/include/librecomp/overlays.hpp
+@@ -6,6 +6,7 @@
+ #include <string>
+ #include <unordered_map>
+ #include <span>
++#include <vector>
+ #include "sections.h"
+ 
+ namespace recomp {
+@@ -32,6 +33,20 @@
+         void read_patch_data(uint8_t* rdram, gpr patch_data_address);
+ 
+         void init_overlays();
++
++        // P4 semantic overlay state: loaded sections by stable section-table
++        // index plus the guest-visible relocation address table. No function
++        // pointers; the function map is rebuilt from the build's section table.
++        struct LoadedSectionRecord {
++            uint32_t section_table_index;
++            int32_t ram_addr;
++        };
++        struct OverlayState {
++            std::vector<LoadedSectionRecord> loaded;
++            std::vector<int32_t> section_addresses;
++        };
++        OverlayState export_overlay_state();
++        bool import_overlay_state(const OverlayState& state);
+         const std::unordered_map<uint32_t, uint16_t>& get_vrom_to_section_map();
+         uint32_t get_section_ram_addr(uint16_t code_section_index);
+         std::span<const RelocEntry> get_section_relocs(uint16_t code_section_index);
+--- a/librecomp/src/overlays.cpp
++++ b/librecomp/src/overlays.cpp
+@@ -271,6 +271,40 @@
+     }
+ }
+ 
++recomp::overlays::OverlayState recomp::overlays::export_overlay_state() {
++    OverlayState state{};
++    for (const auto& section : loaded_sections) {
++        state.loaded.push_back({static_cast<uint32_t>(section.section_table_index), section.loaded_ram_addr});
++    }
++    if (section_addresses != nullptr) {
++        state.section_addresses.assign(section_addresses, section_addresses + sections_info.total_num_sections);
++    }
++    return state;
++}
++
++bool recomp::overlays::import_overlay_state(const OverlayState& state) {
++    if (section_addresses == nullptr || state.section_addresses.size() != sections_info.total_num_sections) {
++        return false;
++    }
++    for (const auto& record : state.loaded) {
++        if (record.section_table_index >= sections_info.num_code_sections) return false;
++    }
++    // Unload the current timeline's sections without touching guest memory.
++    for (const auto& loaded : loaded_sections) {
++        const SectionTableEntry& section = sections_info.code_sections[loaded.section_table_index];
++        for (size_t func_index = 0; func_index < section.num_funcs; func_index++) {
++            func_map.erase(loaded.loaded_ram_addr + section.funcs[func_index].offset);
++        }
++        section_addresses[section.index] = section.ram_addr;
++    }
++    loaded_sections.clear();
++    for (const auto& record : state.loaded) {
++        load_overlay(record.section_table_index, record.ram_addr);
++    }
++    std::copy(state.section_addresses.begin(), state.section_addresses.end(), section_addresses);
++    return true;
++}
++
+ void recomp::overlays::init_overlays() {
+     func_map.clear();
+     section_addresses = (int32_t *)calloc(sections_info.total_num_sections, sizeof(int32_t));
+--- /dev/null
++++ b/ultramodern/include/ultramodern/savestate.hpp
+@@ -0,0 +1,90 @@
++#pragma once
++
++// P4 semantic runtime adapters. Every value here is guest-visible or logical
++// timeline state: guest addresses, guest message words, counters and logical
++// durations. No host pointers, threads, semaphores or wall-clock anchors.
++// Callers must hold a P2 Frozen barrier inside a Capture/Restore transaction.
++
++#include <cstdint>
++#include <vector>
++
++#include "ultramodern/ultra64.h"
++
++struct UltraThreadContext;
++
++namespace ultramodern::savestate {
++
++// ---- Scheduler ----
++PTR(OSThread) get_running_queue_head();
++void set_running_queue_head(PTR(OSThread) head);
++
++// ---- External message inbox ----
++struct InboxMessage {
++    int32_t mq;
++    uint32_t msg;
++    bool jam;
++    bool requeue_if_blocked;
++};
++// While sealed, producer arrivals are held in a transaction-owned deferred
++// list (arrival order and provenance kept) and never enter the logical inbox.
++void seal_external_inbox();
++bool external_inbox_sealed();
++// Inbox contents in delivery order. Non-destructive for the logical inbox.
++std::vector<InboxMessage> export_external_inbox();
++// Replace the logical inbox (old contents are discarded).
++void import_external_inbox(const std::vector<InboxMessage>& messages);
++struct UnsealResult { uint64_t admitted = 0, superseded = 0; };
++// admit=true (capture/rollback): deferred arrivals are appended in arrival
++// order. admit=false (restore commit): old-timeline arrivals are superseded
++// and accounted for, never delivered into the restored timeline.
++UnsealResult unseal_external_inbox(bool admit);
++size_t deferred_external_count();
++
++// ---- Logical time and timers ----
++struct TimeState {
++    int64_t logical_ns = 0;      // logical time since runtime start
++    int64_t ostime_offset = 0;   // osSetTime offset (counter ticks)
++    std::vector<PTR(OSTimer)> active_timers; // timer thread's canonical order
++    uint64_t pending_timer_actions = 0;      // must be zero at a boundary
++};
++TimeState export_time();
++// Rebases the paused logical clock, restores osSetTime's offset and rebuilds
++// the timer set from guest OSTimer records (memory must be installed first).
++bool import_time(const TimeState& state);
++
++// ---- VI and event registrations ----
++struct ViStateRecord {
++    uint32_t mode;          // guest OSViMode address; 0 = runtime dummy mode
++    int32_t framebuffer;
++    int32_t mq;
++    uint32_t msg;
++    uint32_t state;
++    uint32_t control;
++    int32_t retrace_count;
++};
++struct EventRegistration { int32_t mq; uint32_t msg; };
++struct ViEventState {
++    int32_t cur_state = 0;
++    int32_t field = 0;
++    ViStateRecord states[2]{};
++    uint32_t regs[14]{};             // ViRegs in declaration order
++    uint32_t update_screen_regs[14]{};
++    uint64_t total_vis = 0;
++    int32_t remaining_retraces = 1;
++    bool dummy_odd = false;
++    EventRegistration sp{}, dp{}, ai{}, si{};
++};
++ViEventState export_vi_events();
++bool import_vi_events(const ViEventState& state);
++
++// ---- Audio (logical) ----
++uint32_t get_audio_frequency();
++void restore_audio_frequency(uint32_t frequency); // invokes the host callback
++
++// ---- Execution owners ----
++// Starts a native worker for an owner reconstructed from semantic state. The
++// worker registers with the barrier as dormant and waits (scheduler semaphore
++// or restored park) before touching guest state.
++void spawn_restored_thread(RDRAM_ARG PTR(OSThread) t, UltraThreadContext* context);
++
++} // namespace ultramodern::savestate
+--- a/ultramodern/src/audio.cpp
++++ b/ultramodern/src/audio.cpp
+@@ -1,6 +1,7 @@
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
+ #include <cassert>
++#include "ultramodern/savestate.hpp"
+ 
+ static uint32_t sample_rate = 48000;
+ 
+@@ -22,6 +23,14 @@
+     sample_rate = freq;
+ }
+ 
++uint32_t ultramodern::savestate::get_audio_frequency() {
++    return sample_rate;
++}
++
++void ultramodern::savestate::restore_audio_frequency(uint32_t frequency) {
++    set_audio_frequency(frequency);
++}
++
+ void ultramodern::queue_audio_buffer(RDRAM_ARG PTR(int16_t) audio_data_, uint32_t byte_count) {
+     // Ensure that the byte count is an integer multiple of samples.
+     assert((byte_count & 1) == 0);
+--- a/ultramodern/src/events.cpp
++++ b/ultramodern/src/events.cpp
+@@ -18,6 +18,7 @@
+ 
+ #include "ultramodern/rsp.hpp"
+ #include "ultramodern/renderer_context.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ static ultramodern::events::callbacks_t events_callbacks{};
+ 
+@@ -173,6 +174,10 @@
+ }
+ 
+ uint64_t total_vis = 0;
++// VI loop counters at file scope so P4 can export/restore them while the VI
++// thread is parked outside a complete transaction.
++static int remaining_retraces = 1;
++static bool dummy_vi_odd = false;
+ 
+ 
+ extern std::atomic_bool exited;
+@@ -187,7 +192,6 @@
+     ultramodern::set_native_thread_priority(ultramodern::ThreadPriority::Critical);
+     using namespace std::chrono_literals;
+ 
+-    int remaining_retraces = 1;
+ 
+     while (!exited) {
+         sbk::quiescence::vi_boundary();
+@@ -218,9 +222,8 @@
+ 
+         // If the game hasn't started yet, set a dummy VI mode and origin.
+         if (!ultramodern::is_game_started()) {
+-            static bool odd = false;
+-            set_dummy_vi(odd);
+-            odd = !odd;
++            set_dummy_vi(dummy_vi_odd);
++            dummy_vi_odd = !dummy_vi_odd;
+ 
+             sbk::quiescence::accepted(sbk::quiescence::Device::Graphics);
+         events_context.action_queue.enqueue(DummyWorkloadAction{events_context.vi.get_next_state()->framebuffer});
+@@ -477,6 +480,86 @@
+     }
+ }
+ 
++namespace {
++constexpr uint32_t vi_mode_null = 0;
++constexpr uint32_t vi_mode_dummy = 1;
++
++uint32_t export_vi_mode(const OSViMode* mode) {
++    if (mode == nullptr) return vi_mode_null;
++    if (mode == &dummy_mode) return vi_mode_dummy;
++    auto offset = reinterpret_cast<const uint8_t*>(mode) - events_context.rdram;
++    return static_cast<uint32_t>(0x80000000u + static_cast<uint32_t>(offset));
++}
++
++const OSViMode* import_vi_mode(uint32_t mode) {
++    uint8_t* rdram = events_context.rdram;
++    if (mode == vi_mode_null) return nullptr;
++    if (mode == vi_mode_dummy) return &dummy_mode;
++    return TO_PTR(OSViMode, static_cast<int32_t>(mode));
++}
++
++void copy_regs(const ultramodern::renderer::ViRegs& regs, uint32_t (&out)[14]) {
++    static_assert(sizeof(ultramodern::renderer::ViRegs) == sizeof(out));
++    std::memcpy(out, &regs, sizeof(out));
++}
++
++void copy_regs(const uint32_t (&in)[14], ultramodern::renderer::ViRegs& regs) {
++    std::memcpy(&regs, in, sizeof(in));
++}
++}
++
++ultramodern::savestate::ViEventState ultramodern::savestate::export_vi_events() {
++    std::lock_guard lock{ events_context.message_mutex };
++    ViEventState out{};
++    auto& vi = events_context.vi;
++    out.cur_state = vi.cur_state;
++    out.field = vi.field;
++    for (int i = 0; i < 2; ++i) {
++        const ViState& state = vi.states[i];
++        out.states[i] = {export_vi_mode(state.mode), state.framebuffer, state.mq,
++            static_cast<uint32_t>(state.msg), state.state, state.control, state.retrace_count};
++    }
++    copy_regs(vi.regs, out.regs);
++    copy_regs(vi.update_screen_regs, out.update_screen_regs);
++    out.total_vis = total_vis;
++    out.remaining_retraces = remaining_retraces;
++    out.dummy_odd = dummy_vi_odd;
++    out.sp = {events_context.sp.mq, static_cast<uint32_t>(events_context.sp.msg)};
++    out.dp = {events_context.dp.mq, static_cast<uint32_t>(events_context.dp.msg)};
++    out.ai = {events_context.ai.mq, static_cast<uint32_t>(events_context.ai.msg)};
++    out.si = {events_context.si.mq, static_cast<uint32_t>(events_context.si.msg)};
++    return out;
++}
++
++bool ultramodern::savestate::import_vi_events(const ViEventState& in) {
++    if ((in.cur_state != 0 && in.cur_state != 1) || in.field < 0 || in.field > 1) return false;
++    std::lock_guard lock{ events_context.message_mutex };
++    auto& vi = events_context.vi;
++    vi.cur_state = in.cur_state;
++    vi.field = in.field;
++    for (int i = 0; i < 2; ++i) {
++        const auto& record = in.states[i];
++        ViState& state = vi.states[i];
++        state.mode = import_vi_mode(record.mode);
++        state.framebuffer = record.framebuffer;
++        state.mq = record.mq;
++        state.msg = static_cast<OSMesg>(record.msg);
++        state.state = record.state;
++        state.control = record.control;
++        state.retrace_count = record.retrace_count;
++    }
++    copy_regs(in.regs, vi.regs);
++    copy_regs(in.update_screen_regs, vi.update_screen_regs);
++    total_vis = in.total_vis;
++    remaining_retraces = in.remaining_retraces;
++    dummy_vi_odd = in.dummy_odd;
++    events_context.sp.mq = in.sp.mq; events_context.sp.msg = static_cast<OSMesg>(in.sp.msg);
++    events_context.dp.mq = in.dp.mq; events_context.dp.msg = static_cast<OSMesg>(in.dp.msg);
++    events_context.ai.mq = in.ai.mq; events_context.ai.msg = static_cast<OSMesg>(in.ai.msg);
++    events_context.si.mq = in.si.mq; events_context.si.msg = static_cast<OSMesg>(in.si.msg);
++    return true;
++}
++
+ extern "C" void osViSwapBuffer(RDRAM_ARG PTR(void) frameBufPtr) {
+     std::lock_guard lock{ events_context.message_mutex };
+     events_context.vi.get_next_state()->framebuffer = frameBufPtr;
+--- a/ultramodern/src/mesgqueue.cpp
++++ b/ultramodern/src/mesgqueue.cpp
+@@ -3,6 +3,7 @@
+ #include <mutex>
+ 
+ #include "blockingconcurrentqueue.h"
++#include "ultramodern/savestate.hpp"
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
+@@ -19,15 +20,91 @@
+ static moodycamel::ProducerToken external_producer{external_messages};
+ static std::mutex external_producer_mutex;
+ static uint64_t external_sequence = 0, next_external_identity = 0;
++// P4 transaction admission seal. Arrivals while sealed keep their identity and
++// arrival order here and never mutate the logical inbox being captured/installed.
++static bool inbox_sealed = false;
++static std::vector<QueuedMessage> deferred_messages;
++
++static void enqueue_locked(QueuedMessage message) {
++    if (!message.identity) message.identity = ++next_external_identity;
++    sbk::quiescence::note("external-events", "enqueue", ++external_sequence);
++    sbk::quiescence::note("external-events", "identity", message.identity);
++    external_messages.enqueue(external_producer, message);
++}
+ 
+ static void enqueue_ordered(QueuedMessage message) {
+     std::lock_guard lock(external_producer_mutex);
+     if (!message.identity) message.identity = ++next_external_identity;
++    if (inbox_sealed) {
++        sbk::quiescence::note("external-events", "deferred", message.identity);
++        deferred_messages.push_back(message);
++        return;
++    }
+     sbk::quiescence::note("external-events", "enqueue", ++external_sequence);
+     sbk::quiescence::note("external-events", "identity", message.identity);
+     external_messages.enqueue(external_producer, message);
+ }
+ 
++void ultramodern::savestate::seal_external_inbox() {
++    std::lock_guard lock(external_producer_mutex);
++    inbox_sealed = true;
++}
++
++bool ultramodern::savestate::external_inbox_sealed() {
++    std::lock_guard lock(external_producer_mutex);
++    return inbox_sealed;
++}
++
++std::vector<ultramodern::savestate::InboxMessage> ultramodern::savestate::export_external_inbox() {
++    std::lock_guard lock(external_producer_mutex);
++    // Every admission uses the single producer token, so draining yields the
++    // exact delivery order. Reinsert unchanged (same identities).
++    std::vector<QueuedMessage> drained;
++    QueuedMessage message;
++    while (external_messages.try_dequeue(message)) drained.push_back(message);
++    std::vector<InboxMessage> result;
++    result.reserve(drained.size());
++    for (const auto& entry : drained) {
++        external_messages.enqueue(external_producer, entry);
++        result.push_back({entry.mq, static_cast<uint32_t>(entry.mesg), entry.jam, entry.requeue_if_blocked});
++    }
++    return result;
++}
++
++void ultramodern::savestate::import_external_inbox(const std::vector<InboxMessage>& messages) {
++    std::lock_guard lock(external_producer_mutex);
++    QueuedMessage discarded;
++    while (external_messages.try_dequeue(discarded)) {
++        sbk::quiescence::note("external-events", "replaced", discarded.identity);
++    }
++    for (const auto& entry : messages) {
++        enqueue_locked({entry.mq, static_cast<OSMesg>(entry.msg), entry.jam, entry.requeue_if_blocked});
++    }
++}
++
++ultramodern::savestate::UnsealResult ultramodern::savestate::unseal_external_inbox(bool admit) {
++    std::lock_guard lock(external_producer_mutex);
++    UnsealResult result{};
++    inbox_sealed = false;
++    for (const auto& entry : deferred_messages) {
++        if (admit) {
++            external_messages.enqueue(external_producer, entry);
++            sbk::quiescence::note("external-events", "deferred-admitted", entry.identity);
++            ++result.admitted;
++        } else {
++            sbk::quiescence::note("external-events", "deferred-superseded", entry.identity);
++            ++result.superseded;
++        }
++    }
++    deferred_messages.clear();
++    return result;
++}
++
++size_t ultramodern::savestate::deferred_external_count() {
++    std::lock_guard lock(external_producer_mutex);
++    return deferred_messages.size();
++}
++
+ void ultramodern::enqueue_external_message(PTR(OSMesgQueue) mq, OSMesg msg, bool jam, bool requeue_if_blocked) {
+     enqueue_ordered({mq, msg, jam, requeue_if_blocked});
+ }
+--- a/ultramodern/src/threadqueue.cpp
++++ b/ultramodern/src/threadqueue.cpp
+@@ -1,9 +1,18 @@
+ #include <cassert>
+ 
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ static PTR(OSThread) running_queue_impl = NULLPTR;
+ 
++PTR(OSThread) ultramodern::savestate::get_running_queue_head() {
++    return running_queue_impl;
++}
++
++void ultramodern::savestate::set_running_queue_head(PTR(OSThread) head) {
++    running_queue_impl = head;
++}
++
+ static PTR(OSThread)* queue_to_ptr(RDRAM_ARG PTR(PTR(OSThread)) queue) {
+     if (queue == ultramodern::running_queue) {
+         return &running_queue_impl;
+--- a/ultramodern/src/threads.cpp
++++ b/ultramodern/src/threads.cpp
+@@ -12,6 +12,14 @@
+ #include "blockingconcurrentqueue.h"
+ 
+ #include "ultramodern/threads.hpp"
++#include "ultramodern/savestate.hpp"
++
++// P4: a retired owner leaves through the runtime's own termination path. The
++// thrower runs on the retired worker only after the barrier has woken it.
++static const bool sbk_retire_thrower_installed = [] {
++    sbk::quiescence::set_retire_thrower([] { throw ultramodern::thread_terminated{}; });
++    return true;
++}();
+ 
+ // Native APIs only used to set thread names for easier debugging
+ #ifdef _WIN32
+@@ -165,10 +173,20 @@
+     }
+ }
+ 
++#ifdef SBK_CONTINUATIONS
++// Marks the semaphore signal in flight so a barrier can tell a sleeping owner
++// from one that already holds the run token but has not woken yet.
++static void signal_owner(OSThread* t) {
++    auto* context = sbk::continuation::context_for(t);
++    sbk::quiescence::owner_signal(sbk::continuation::address_for(t));
++    context->running.signal();
++}
++#endif
++
+ void resume_thread(OSThread* t) {
+     debug_printf("[Thread] Resuming execution of thread %d\n", t->id);
+ #ifdef SBK_CONTINUATIONS
+-    sbk::continuation::context_for(t)->running.signal();
++    signal_owner(t);
+ #else
+     t->context->running.signal();
+ #endif
+@@ -182,7 +200,7 @@
+     OSThread* to_run = TO_PTR(OSThread, ultramodern::thread_queue_pop(PASS_RDRAM ultramodern::running_queue));
+     debug_printf("[Scheduling] Resuming execution of thread %d\n", to_run->id);
+ #ifdef SBK_CONTINUATIONS
+-    sbk::continuation::context_for(to_run)->running.signal();
++    signal_owner(to_run);
+ #else
+     to_run->context->running.signal();
+ #endif
+@@ -266,6 +284,51 @@
+     ultramodern::cleanup_thread(thread_context);
+ }
+ 
++#ifdef SBK_CONTINUATIONS
++// P4 reconstructed owner. It never replays the thread entrypoint for a started
++// execution: it waits exactly where the saved owner waited, then continues the
++// saved continuation frames (redoing only a pending scheduler operation).
++static void _restored_thread_func(RDRAM_ARG PTR(OSThread) self_, UltraThreadContext* thread_context) {
++    sbk::continuation::bind_worker(thread_context);
++    sbk::quiescence::Owner execution_owner{static_cast<uint32_t>(self_)};
++    OSThread *self = TO_PTR(OSThread, self_);
++    thread_self = self_;
++    is_game_thread = true;
++    ultramodern::set_native_thread_name(ultramodern::threads::get_game_thread_name(self));
++    ultramodern::set_native_thread_priority(ultramodern::ThreadPriority::High);
++    const auto start = sbk::continuation::take_restore_start();
++    thread_context->initialized.signal();
++    try {
++        if (start == sbk::continuation::RestoreStart::Sleeping) {
++            wait_for_resumed(PASS_RDRAM thread_context);
++        } else {
++            sbk::quiescence::restored_owner_park();
++        }
++        if (sbk::continuation::owner_is_current()) {
++            auto* execution = sbk::continuation::current_execution();
++            if (!execution->started) {
++                run_thread_function(PASS_RDRAM
++                    static_cast<PTR(thread_func_t)>(static_cast<int32_t>(sbk::continuation::current_entrypoint())),
++                    self->sp,
++                    static_cast<PTR(void)>(static_cast<int32_t>(sbk::continuation::current_argument())));
++            } else {
++                sbk::continuation::resume_execution(PASS_RDRAM *execution);
++            }
++        }
++    } catch (ultramodern::thread_terminated& terminated) {
++    }
++    if (sbk::continuation::finish_current_owner()) {
++        run_next_thread(PASS_RDRAM1);
++    }
++    ultramodern::cleanup_thread(thread_context);
++}
++
++void ultramodern::savestate::spawn_restored_thread(RDRAM_ARG PTR(OSThread) t_, UltraThreadContext* context) {
++    context->host_thread = std::thread{_restored_thread_func, PASS_RDRAM t_, context};
++    context->initialized.wait();
++}
++#endif
++
+ extern "C" void osStartThread(RDRAM_ARG PTR(OSThread) t_) {
+     OSThread* t = TO_PTR(OSThread, t_);
+     debug_printf("[os] Start Thread %d\n", t->id);
+@@ -297,7 +360,8 @@
+     // Spawn a new thread, which will immediately pause itself and wait until it's been started.
+     // Pass the context as an argument to the thread function to ensure that it can't get cleared before the thread captures its value.
+ #ifdef SBK_CONTINUATIONS
+-    UltraThreadContext* context = sbk::continuation::create_owner(static_cast<uint32_t>(t_), t);
++    UltraThreadContext* context = sbk::continuation::create_owner(static_cast<uint32_t>(t_), t,
++        static_cast<uint32_t>(entrypoint), static_cast<uint32_t>(arg));
+ #else
+     UltraThreadContext* context = new UltraThreadContext{};
+     t->context = context;
+--- a/ultramodern/src/timer.cpp
++++ b/ultramodern/src/timer.cpp
+@@ -6,6 +6,7 @@
+ 
+ #include "ultramodern/ultra64.h"
+ #include "ultramodern/ultramodern.hpp"
++#include "ultramodern/savestate.hpp"
+ 
+ #ifdef _WIN32
+ #define WIN32_LEAN_AND_MEAN
+@@ -67,12 +68,13 @@
+     return duration_to_ticks(sbk::quiescence::logical_now() - start_time);
+ }
+ 
+-void timer_thread(RDRAM_ARG1) {
+-    ultramodern::set_native_thread_name("Timer Thread");
+-    ultramodern::set_native_thread_priority(ultramodern::ThreadPriority::VeryHigh);
++// Guest memory used by the timer ordering. Set once when the timer thread starts.
++static uint8_t* timer_rdram = nullptr;
+ 
+-    // Lambda comparator function to keep the set ordered
+-    auto timer_sort = [PASS_RDRAM1](PTR(OSTimer) a_, PTR(OSTimer) b_) {
++// Comparator keeping the set ordered by guest timestamp, then address.
++struct TimerSort {
++    bool operator()(PTR(OSTimer) a_, PTR(OSTimer) b_) const {
++        uint8_t* rdram = timer_rdram;
+         OSTimer* a = TO_PTR(OSTimer, a_);
+         OSTimer* b = TO_PTR(OSTimer, b_);
+ 
+@@ -83,10 +85,18 @@
+ 
+         // If they have the exact same timestamp then order by address instead
+         return a < b;
+-    };
++    }
++};
+ 
+-    // Ordered set of timers that are currently active
+-    std::set<PTR(OSTimer), decltype(timer_sort)> active_timers{timer_sort};
++// Ordered set of timers that are currently active. File scope so a P4
++// restore can rebuild it (after guest memory changes its ordering keys)
++// while the timer thread is parked at its canonical boundary.
++static std::set<PTR(OSTimer), TimerSort> active_timers;
++
++void timer_thread(RDRAM_ARG1) {
++    ultramodern::set_native_thread_name("Timer Thread");
++    ultramodern::set_native_thread_priority(ultramodern::ThreadPriority::VeryHigh);
++    timer_rdram = PASS_RDRAM1;
+     
+     // Lambda to process a timer action to handle adding and removing timers
+     auto process_timer_action = [&](const Action& action) {
+@@ -179,6 +189,30 @@
+     return (uint32_t)total_count;
+ }
+ 
++ultramodern::savestate::TimeState ultramodern::savestate::export_time() {
++    TimeState state{};
++    state.logical_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
++        sbk::quiescence::logical_now() - start_time).count();
++    state.ostime_offset = ostime_offset;
++    state.active_timers.assign(active_timers.begin(), active_timers.end());
++    state.pending_timer_actions = timer_context.action_queue.size_approx();
++    return state;
++}
++
++bool ultramodern::savestate::import_time(const TimeState& state) {
++    if (state.pending_timer_actions != 0) return false;
++    const auto logical = start_time + std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(
++        std::chrono::nanoseconds{state.logical_ns});
++    if (!sbk::quiescence::rebase_logical_clock(logical)) return false;
++    ostime_offset = state.ostime_offset;
++    // Actions accepted by the discarded timeline never reach the restored one.
++    Action stale;
++    while (timer_context.action_queue.try_dequeue(stale)) {}
++    active_timers.clear();
++    for (PTR(OSTimer) timer : state.active_timers) active_timers.insert(timer);
++    return active_timers.size() == state.active_timers.size();
++}
++
+ extern "C" void osSetCount(u32 count) {
+     assert(false);
+ }

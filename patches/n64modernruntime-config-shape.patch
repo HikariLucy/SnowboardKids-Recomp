@@ -1,0 +1,20 @@
+diff --git a/librecomp/src/config.cpp b/librecomp/src/config.cpp
+index 6bc03fd..89e791c 100644
+--- a/librecomp/src/config.cpp
++++ b/librecomp/src/config.cpp
+@@ -530,7 +530,15 @@ bool Config::load_config(std::function<bool(nlohmann::json &)> validate_callback
+         return false;
+     }
+ 
++    // A readable file of the wrong shape (array, string, number) is treated
++    // like empty storage: every option takes its schema default.
++    if (!config_json.is_object()) {
++        config_json = nlohmann::json::object();
++    }
+     nlohmann::json *json_config_root = get_config_storage_root(&config_json);
++    if (!json_config_root->is_object()) {
++        *json_config_root = nlohmann::json::object();
++    }
+ 
+     for (const auto& option : schema.options) {
+         auto json_value = (*json_config_root)[option.id];

@@ -1,0 +1,251 @@
+diff --git a/recompinput/include/recompinput/ux_trace.h b/recompinput/include/recompinput/ux_trace.h
+new file mode 100644
+index 0000000..919fc55
+--- /dev/null
++++ b/recompinput/include/recompinput/ux_trace.h
+@@ -0,0 +1,29 @@
++#pragma once
++
++#include <cstdio>
++#include <cstdlib>
++
++namespace recompinput::ux_trace {
++inline bool enabled() {
++    static const bool active = [] {
++        const char* value = std::getenv("SBK_UX_TRACE");
++        return value != nullptr && value[0] == '1' && value[1] == '\0';
++    }();
++    return active;
++}
++
++inline void log(const char* message) {
++    if (!enabled()) return;
++    std::fprintf(stderr, "UX %s\n", message);
++    std::fflush(stderr);
++}
++
++template <typename... Args>
++inline void log(const char* format, Args... args) {
++    if (!enabled()) return;
++    std::fprintf(stderr, "UX ");
++    std::fprintf(stderr, format, args...);
++    std::fprintf(stderr, "\n");
++    std::fflush(stderr);
++}
++}
+diff --git a/recompinput/src/input_binding.cpp b/recompinput/src/input_binding.cpp
+index 45d55a7..fb7bfa4 100644
+--- a/recompinput/src/input_binding.cpp
++++ b/recompinput/src/input_binding.cpp
+@@ -3,6 +3,7 @@
+ #include "input_state.h"
+ #include "players.h"
+ #include "profiles.h"
++#include "recompinput/ux_trace.h"
+ 
+ namespace recompinput {
+ 
+@@ -28,6 +29,7 @@ namespace recompinput {
+     } BindingState;
+ 
+     void binding::start_scanning(int player_index, recompinput::GameInput game_input, int binding_index, recompinput::InputDevice device) {
++        ux_trace::log("CAPTURE BEGIN %s slot=%d device=%s", get_game_input_name(game_input).c_str(), binding_index + 1, device == InputDevice::Keyboard ? "Keyboard" : "Controller");
+         BindingState.active = true;
+         BindingState.skip_events = false;
+         BindingState.player_index = player_index;
+@@ -66,12 +68,14 @@ namespace recompinput {
+     }
+ 
+     void binding::set_scanned_input(recompinput::InputField value) {
++        ux_trace::log("CAPTURE INPUT device=%s type=%d code=%d label=%s", BindingState.device == InputDevice::Keyboard ? "Keyboard" : "Controller", static_cast<int>(value.input_type), value.input_id, value.to_string().c_str());
+         profiles::set_input_binding(
+             profiles::get_input_profile_for_player(BindingState.player_index, BindingState.device),
+             BindingState.game_input,
+             BindingState.binding_index,
+             value
+         );
++        ux_trace::log("CAPTURE COMMIT %s slot=%d", get_game_input_name(BindingState.game_input).c_str(), BindingState.binding_index + 1);
+         binding::stop_scanning();
+     }
+ 
+diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
+index 80f8b5b..3d52d56 100644
+--- a/recompinput/src/input_events.cpp
++++ b/recompinput/src/input_events.cpp
+@@ -3,6 +3,7 @@
+ #include "recompinput/input_events.h"
+ #include "recompinput/profiles.h"
+ #include "recompui/config.h"
++#include "recompinput/ux_trace.h"
+ #include "ultramodern/ultramodern.hpp"
+ 
+ static struct {
+@@ -72,6 +73,7 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+         }
+         if (binding::is_binding()) {
+             if (keyevent->keysym.scancode == SDL_Scancode::SDL_SCANCODE_ESCAPE) {
++                ux_trace::log("CAPTURE CANCEL reason=Escape");
+                 binding::stop_scanning();
+             }
+             else if (binding::get_scanning_device() == InputDevice::Keyboard) {
+@@ -144,6 +146,7 @@ bool sdl_event_filter(void* userdata, SDL_Event* event) {
+             // note - magic number: 0 is InputType::None
+             if ((menuToggleBinding0.input_type != InputType::None && event->cbutton.button == menuToggleBinding0.input_id) ||
+                 (menuToggleBinding1.input_type != InputType::None && event->cbutton.button == menuToggleBinding1.input_id)) {
++                ux_trace::log("CAPTURE CANCEL reason=ControllerToggle");
+                 binding::stop_scanning();
+             }
+             else if (binding::get_scanning_device() == InputDevice::Controller) {
+diff --git a/recompui/src/composites/ui_prompt.cpp b/recompui/src/composites/ui_prompt.cpp
+index eba4f5e..9790613 100644
+--- a/recompui/src/composites/ui_prompt.cpp
++++ b/recompui/src/composites/ui_prompt.cpp
+@@ -1,6 +1,7 @@
+ #include <mutex>
+ 
+ #include "recompui.h"
++#include "recompinput/ux_trace.h"
+ 
+ #include "elements/ui_element.h"
+ #include "elements/ui_document.h"
+@@ -141,10 +142,12 @@ void recompui::init_prompt_context() {
+ 
+     prompt_state.confirm_button = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Success);
+     prompt_state.confirm_button->set_min_width(185.0f, Unit::Dp);
++    prompt_state.confirm_button->set_debug_id("PromptConfirm");
+     prompt_state.confirm_button->add_pressed_callback(run_confirm_callback);
+ 
+     prompt_state.cancel_button = context.create_element<Button>(prompt_state.prompt_controls, "", ButtonStyle::Danger);
+     prompt_state.cancel_button->set_min_width(185.0f, Unit::Dp);
++    prompt_state.cancel_button->set_debug_id("PromptCancel");
+     prompt_state.cancel_button->add_pressed_callback(run_cancel_callback);
+ 
+     apply_prompt_theme();
+@@ -170,6 +173,9 @@ void show_prompt(std::function<void()>& prev_cancel_action, bool focus_on_cancel
+             prev_cancel_action();
+         }
+     }
++    // show_context only applies autofocus when the mouse is inactive. A
++    // destructive prompt still needs its requested default when mouse opened it.
++    (focus_on_cancel ? prompt_state.cancel_button : prompt_state.confirm_button)->focus();
+ }
+ 
+ void recompui::open_choice_prompt(
+diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
+index d876510..d40b783 100644
+--- a/recompui/src/config/ui_config_page_controls.cpp
++++ b/recompui/src/config/ui_config_page_controls.cpp
+@@ -8,6 +8,7 @@
+ #include "elements/ui_binding_button.h"
+ #include "elements/ui_select.h"
+ #include "recompinput/profiles.h"
++#include "recompinput/ux_trace.h"
+ #include "recompui/config.h"
+ #include "recompui/recompui.h"
+ 
+@@ -573,8 +574,10 @@ void ConfigPageControls::render_footer() {
+             if (theme::get_frontend_theme().controls.input_device_toggle == theme::TogglePreset::Filled) {
+                 keyboard_toggle->set_color_preset(ToggleColorPreset::Filled);
+             }
++            keyboard_toggle->set_debug_id("InputProfileToggle");
+             keyboard_toggle->set_checked(single_player_show_keyboard_mappings);
+             keyboard_toggle->add_checked_callback([this](bool checked) {
++                recompinput::ux_trace::log("PROFILE %s", checked ? "Keyboard" : "Controller");
+                 this->single_player_show_keyboard_mappings = checked;
+                 this->update_control_mappings();
+             });
+@@ -584,7 +587,9 @@ void ConfigPageControls::render_footer() {
+         auto footer_right = footer->get_right();
+         footer_right->clear_children();
+         auto reset_to_defaults_button = context.create_element<Button>(footer_right, "Reset to defaults", ButtonStyle::Warning);
++        reset_to_defaults_button->set_debug_id("ResetControlsButton");
+         reset_to_defaults_button->add_pressed_callback([this]() {
++            recompinput::ux_trace::log("RESET MODAL OPEN default_focus=Cancel");
+             // Destructive for every binding in the profile: confirm first, focus on Cancel.
+             const int profile_index = this->selected_profile_index;
+             const recompinput::InputDevice device = this->get_player_input_device();
+@@ -594,10 +599,11 @@ void ConfigPageControls::render_footer() {
+                     "\" returns to its default. This cannot be undone.",
+                 "Reset", "Cancel",
+                 [this, profile_index, device]() {
++                    recompinput::ux_trace::log("RESET CONFIRM");
+                     recompinput::profiles::reset_profile_bindings(profile_index, device);
+                     this->update_control_mappings();
+                 },
+-                []() {},
++                []() { recompinput::ux_trace::log("RESET CANCEL"); },
+                 ButtonStyle::Warning, ButtonStyle::Secondary, true);
+         });
+     }
+@@ -663,6 +669,7 @@ void ConfigPageControls::render_control_mappings() {
+         }
+     }
+ 
++    recompinput::ux_trace::log("PROFILE %s", get_player_input_device() == recompinput::InputDevice::Keyboard ? "Keyboard" : "Controller");
+     update_control_mappings();
+     if (queue_first_game_input_row_focus && game_input_rows.size() > 0) {
+         game_input_rows[0]->focus_on_first_binding();
+diff --git a/recompui/src/elements/ui_element.cpp b/recompui/src/elements/ui_element.cpp
+index 9ffc014..20e0bfc 100644
+--- a/recompui/src/elements/ui_element.cpp
++++ b/recompui/src/elements/ui_element.cpp
+@@ -4,6 +4,7 @@
+ #include "overloaded.h"
+ #include "recompui.h"
+ #include "ui_element.h"
++#include "recompinput/ux_trace.h"
+ #include "../core/ui_context.h"
+ 
+ #include <cassert>
+@@ -303,6 +304,7 @@ void Element::ProcessEvent(Rml::Event &event) {
+             handle_event(Event::hover_event(false));
+             break;
+         case Rml::EventId::Focus: {
++            if (!get_debug_id_or_id().empty()) recompinput::ux_trace::log("FOCUS %s", get_debug_id_or_id().c_str());
+             handle_event(Event::focus_event(true));
+ 
+             // Only notify if this isn't the root document being focused (happens when documents are opened)
+diff --git a/recompui/src/elements/ui_modal.cpp b/recompui/src/elements/ui_modal.cpp
+index 29eff44..787e01d 100644
+--- a/recompui/src/elements/ui_modal.cpp
++++ b/recompui/src/elements/ui_modal.cpp
+@@ -5,6 +5,7 @@
+ #include "ui_frontend_theme.h"
+ #include "recompinput/recompinput.h"
+ #include "recompinput/profiles.h"
++#include "recompinput/ux_trace.h"
+ 
+ namespace recompui {
+ 
+@@ -116,6 +117,7 @@ Modal::Modal(
+     body->apply_style(modal_theme.body);
+ 
+     set_menu_action_callback(MenuAction::Toggle, [this]() {
++        recompinput::ux_trace::log("OVERLAY CLOSE REQUEST reason=Toggle");
+         this->close();
+     }, "Close");
+ }
+@@ -130,6 +132,7 @@ void Modal::open() {
+ 
+     is_open = true;
+     set_display(Display::Block);
++    recompinput::ux_trace::log("OVERLAY OPEN");
+ }
+ 
+ void TabbedModal::open() {
+@@ -148,6 +151,7 @@ bool Modal::close() {
+     }
+ 
+     is_open = false;
++    recompinput::ux_trace::log("OVERLAY CLOSE reason=ModalClose");
+ 
+     if (on_close_callback != nullptr) {
+         on_close_callback();
+@@ -391,6 +395,7 @@ void TabbedModal::on_tab_change(int tab_index) {
+     } else {
+         current_tab_index = tab_index;
+     }
++    if (current_tab_index >= 0 && current_tab_index < tab_contexts.size()) recompinput::ux_trace::log("TAB %s", tab_contexts[current_tab_index].name.c_str());
+ }
+ 
+ void TabbedModal::set_selected_tab(int tab_index) {

@@ -11,8 +11,18 @@ snowboardkids.z64
 assets/extracted/
 asset-backups/
 build/
+build-pfs/
 out/
 dist/
+modules/
+*.so
+*.dll
+*.dylib
+*.o
+*.obj
+SnowboardKidsGame.*
+MODULE-INFO.json
+.tmp_*
 
 # Tooling and local environments
 .venv/
@@ -30,6 +40,14 @@ __pycache__/
 *.log
 logs/
 
+# Savestates (generated) and interrupted-save temporaries
+*.sbks
+.*.sbks.tmp-*
+*.mpk
+*.pak
+*.mpk.tmp-*
+runtime-data/
+
 # Recompiler toolchain / generated native code
 .deps/
 build-tools/
@@ -44,3 +62,12 @@ build-rom-inspect/
 build-runtime-smoke/
 .deps-renderer/
 build-renderer-stack/
+build-release/
+# Local dependency links and release verification builds
+.deps
+.deps-runtime
+.deps-renderer
+build-tools
+build-release-ci/
+build-ci/
+build-split/

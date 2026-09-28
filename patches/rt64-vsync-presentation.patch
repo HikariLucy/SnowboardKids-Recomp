@@ -1,0 +1,254 @@
+diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
+index 785de27..abb28ac 100644
+--- a/src/hle/rt64_application.cpp
++++ b/src/hle/rt64_application.cpp
+@@ -16,6 +16,12 @@
+ #   include "res/bluenoise/LDR_64_64_64_RGB1.h"
+ #endif
+ 
++#include "plume_vulkan.h"
++
++#if defined(_WIN32)
++#   include "plume_d3d12.h"
++#endif
++
+ //#define LOG_DISPLAY_LISTS
+ 
+ namespace plume {
+@@ -333,6 +339,24 @@ namespace RT64 {
+ 
+         swapChain = presentGraphicsWorker->commandQueue->createSwapChain(swapChainDesc);
+ 
++        // VSync Off is only offered when the swap chain can actually present without waiting for the display.
++        vsyncOffSupported = false;
++        if (swapChain != nullptr) {
++            switch (chosenGraphicsAPI) {
++            case UserConfiguration::GraphicsAPI::Vulkan:
++                vsyncOffSupported = static_cast<const VulkanSwapChain *>(swapChain.get())->immediatePresentModeSupported;
++                break;
++#       if defined(_WIN32)
++            case UserConfiguration::GraphicsAPI::D3D12:
++                vsyncOffSupported = (static_cast<const D3D12SwapChain *>(swapChain.get())->swapChainFlags & DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING) != 0;
++                break;
++#       endif
++            default:
++                // Metal display sync is not validated for this integration.
++                break;
++            }
++        }
++
+         // Before configuring multisampling, make sure the device actually supports it for the formats we'll use. If it doesn't, turn off antialiasing in the configuration.
+         const RenderSampleCounts colorSampleCounts = device->getSampleCountsSupported(RenderTarget::colorBufferFormat(usesHDR));
+         const RenderSampleCounts depthSampleCounts = device->getSampleCountsSupported(RenderTarget::depthBufferFormat());
+@@ -422,6 +446,7 @@ namespace RT64 {
+         presentExt.sharedResources = sharedQueueResources.get();
+         presentExt.shaderLibrary = shaderLibrary.get();
+         presentExt.createdGraphicsAPI = chosenGraphicsAPI;
++        presentExt.logPresentTiming = logPresentTiming;
+         presentQueue->setup(presentExt);
+ 
+         // Configure the state to use all the created components.
+@@ -753,4 +778,13 @@ namespace RT64 {
+     void Application::setFullScreen(bool fullscreen) {
+         appWindow->setFullScreen(fullscreen);
+     }
++
++    void Application::setVsyncEnabled(bool enabled) {
++        // Never request an unsynchronized mode the swap chain cannot provide.
++        presentQueue->requestVsync(enabled || !vsyncOffSupported);
++    }
++
++    bool Application::isVsyncActive() const {
++        return presentQueue->vsyncActive;
++    }
+ };
+diff --git a/src/hle/rt64_application.h b/src/hle/rt64_application.h
+index 6c83fe0..6096898 100644
+--- a/src/hle/rt64_application.h
++++ b/src/hle/rt64_application.h
+@@ -134,6 +134,8 @@ namespace RT64 {
+         std::unique_ptr<SharedQueueResources> sharedQueueResources;
+         std::unique_ptr<RenderInterface> renderInterface;
+         std::atomic<bool> debuggerPaused;
++        bool vsyncOffSupported = false;
++        bool logPresentTiming = false;
+         uint64_t frameCounter;
+         uint32_t threadsAvailable;
+         ProfilingTimer dlApiProfiler = ProfilingTimer(120);
+@@ -172,5 +174,7 @@ namespace RT64 {
+         void updateEmulatorConfig();
+         void updateEnhancementConfig();
+         void setFullScreen(bool fullscreen);
++        void setVsyncEnabled(bool enabled);
++        bool isVsyncActive() const;
+     };
+ };
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 3227ab1..ab18cb2 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -85,6 +85,7 @@ namespace RT64 {
+ 
+     void PresentQueue::setup(const External &ext) {
+         this->ext = ext;
++        presentTiming.enabled = ext.logPresentTiming;
+ 
+         viRenderer = std::make_unique<VIRenderer>();
+ 
+@@ -394,6 +395,8 @@ namespace RT64 {
+                     Timer::preciseSleepUntil(presentTimestamp + std::chrono::nanoseconds(1'000'000'000 / targetRate));
+                 }
+ 
++                // Host time blocked on presentation: the present wait plus the present call itself.
++                const auto presentBlockStart = std::chrono::steady_clock::now();
+                 if (presentWaitEnabled) {
+                     ext.swapChain->wait();
+                 }
+@@ -401,6 +404,10 @@ namespace RT64 {
+                 RenderCommandSemaphore *waitSemaphore = drawSemaphores[swapChainIndex].get();
+                 presentTimestamp = Timer::current();
+                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
++                if (presentTiming.enabled) {
++                    threadRecordPresentTiming(presentBlockStart, std::chrono::steady_clock::now());
++                }
++
+                 presentProfiler.logAndRestart();
+             }
+         }
+@@ -430,6 +437,48 @@ namespace RT64 {
+         barrierCursor = (barrierCursor + 1) % presents.size();
+     }
+ 
++    void PresentQueue::requestVsync(bool enabled) {
++        vsyncRequest = enabled ? 1 : 0;
++    }
++
++    void PresentQueue::threadApplyVsyncRequest() {
++        const int request = vsyncRequest.exchange(-1);
++        if (request < 0) {
++            return;
++        }
++
++        // Vulkan only records the required present mode here; needsResize() then recreates the
++        // swap chain through the regular resize path. D3D12 reads the flag on the next present.
++        ext.swapChain->setVsyncEnabled(request != 0);
++        fprintf(stderr, "RT64 presentation sync: requested %s\n", (request != 0) ? "On" : "Off");
++    }
++
++    void PresentQueue::threadRecordPresentTiming(std::chrono::steady_clock::time_point blockStart, std::chrono::steady_clock::time_point blockEnd) {
++        PresentTiming &t = presentTiming;
++        const double blockMs = std::chrono::duration<double, std::milli>(blockEnd - blockStart).count();
++        if (t.last != std::chrono::steady_clock::time_point()) {
++            const double intervalMs = std::chrono::duration<double, std::milli>(blockEnd - t.last).count();
++            t.intervalMinMs = (t.count == 0) ? intervalMs : std::min(t.intervalMinMs, intervalMs);
++            t.intervalMaxMs = std::max(t.intervalMaxMs, intervalMs);
++            t.intervalSumMs += intervalMs;
++            t.blockSumMs += blockMs;
++            t.blockMaxMs = std::max(t.blockMaxMs, blockMs);
++            t.count++;
++        }
++
++        t.last = blockEnd;
++
++        constexpr uint32_t SummaryPresents = 600;
++        if (t.count == SummaryPresents) {
++            fprintf(stderr, "RT64 present timing: vsync=%s presents=%u interval_ms mean=%.3f min=%.3f max=%.3f present_block_ms mean=%.3f max=%.3f\n",
++                vsyncActive ? "On" : "Off", t.count, t.intervalSumMs / t.count, t.intervalMinMs, t.intervalMaxMs, t.blockSumMs / t.count, t.blockMaxMs);
++            const auto last = t.last;
++            t = PresentTiming();
++            t.enabled = true;
++            t.last = last;
++        }
++    }
++
+     void PresentQueue::threadLoop() {
+         Thread::setCurrentThreadName("RT64 Present");
+ 
+@@ -465,6 +514,8 @@ namespace RT64 {
+ 
+             if (processCursor >= 0) {
+                 std::unique_lock<std::mutex> threadLock(threadMutex);
++                threadApplyVsyncRequest();
++
+                 const bool needsResize = ext.swapChain->needsResize() || !swapChainValid;
+                 if (needsResize) {
+                     ext.presentGraphicsWorker->commandList->begin();
+@@ -484,6 +535,20 @@ namespace RT64 {
+                     }
+                 }
+ 
++                // Publish the mode of the live swap chain, which can differ from the request when the
++                // surface does not offer an unsynchronized mode or the swap chain could not be recreated yet.
++                if (swapChainValid) {
++                    const int active = ext.swapChain->isVsyncEnabled() ? 1 : 0;
++                    if (active != vsyncReported) {
++                        vsyncActive = (active != 0);
++                        vsyncReported = active;
++                        fprintf(stderr, "RT64 presentation sync: active %s\n", (active != 0) ? "On" : "Off");
++
++                        // Pacing statistics must not mix intervals from both presentation modes.
++                        presentTiming = PresentTiming{ presentTiming.enabled };
++                    }
++                }
++
+                 if (needsResize || ext.appWindow->detectWindowMoved()) {
+                     ext.appWindow->detectRefreshRate();
+                     ext.sharedResources->setSwapChainRate(std::min(ext.appWindow->getRefreshRate(), displayTimingRate));
+diff --git a/src/hle/rt64_present_queue.h b/src/hle/rt64_present_queue.h
+index e08b02c..7b20a6e 100644
+--- a/src/hle/rt64_present_queue.h
++++ b/src/hle/rt64_present_queue.h
+@@ -4,6 +4,9 @@
+ 
+ #pragma once
+ 
++#include <atomic>
++#include <chrono>
++
+ #include "common/rt64_profiling_timer.h"
+ #include "gui/rt64_inspector.h"
+ #include "render/rt64_vi_renderer.h"
+@@ -27,6 +30,7 @@ namespace RT64 {
+             SharedQueueResources *sharedResources = nullptr;
+             const ShaderLibrary *shaderLibrary = nullptr;
+             UserConfiguration::GraphicsAPI createdGraphicsAPI = UserConfiguration::GraphicsAPI::OptionCount;
++            bool logPresentTiming = false;
+         };
+ 
+         External ext;
+@@ -58,6 +62,24 @@ namespace RT64 {
+         VIHistory viHistory;
+         bool presentWaitEnabled = false;
+ 
++        // Host presentation sync (VSync). Requests are only applied on the present thread,
++        // which owns the swap chain; -1 means no pending request.
++        std::atomic<int> vsyncRequest = -1;
++        std::atomic<bool> vsyncActive = true;
++        int vsyncReported = -1;
++
++        // Opt-in present pacing summary for validation; never logs per frame.
++        struct PresentTiming {
++            bool enabled = false;
++            uint32_t count = 0;
++            std::chrono::steady_clock::time_point last;
++            double intervalSumMs = 0.0;
++            double intervalMinMs = 0.0;
++            double intervalMaxMs = 0.0;
++            double blockSumMs = 0.0;
++            double blockMaxMs = 0.0;
++        } presentTiming;
++
+         PresentQueue();
+         ~PresentQueue();
+         void reset();
+@@ -71,6 +93,9 @@ namespace RT64 {
+         void skipInterpolation();
+         void notifyPresentId(const Present &present);
+         void threadAdvanceBarrier();
++        void requestVsync(bool enabled);
++        void threadApplyVsyncRequest();
++        void threadRecordPresentTiming(std::chrono::steady_clock::time_point blockStart, std::chrono::steady_clock::time_point blockEnd);
+         void threadLoop();
+     };
+ };
+\ No newline at end of file

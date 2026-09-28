@@ -1,0 +1,3 @@
+body { font-family: LatoLatin; color: #172B46; }
+h1, h2, h3, .sbk-heading { font-family: Fredoka; }
+.sbk-glyph { font-family: PromptFont; }

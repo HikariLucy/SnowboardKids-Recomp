@@ -1,0 +1,132 @@
+diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
+index 89f2425..78adf24 100644
+--- a/src/hle/rt64_workload_queue.cpp
++++ b/src/hle/rt64_workload_queue.cpp
+@@ -84,6 +84,17 @@ namespace RT64 {
+         }
+     }
+ 
++    void WorkloadQueue::setQuiescence(bool requested) {
++        std::unique_lock<std::mutex> lock(idleMutex);
++        quiescenceRequested = requested;
++        idleCondition.notify_all();
++        if (requested) {
++            // condition_variable releases idleMutex while waiting for the idle
++            // worker to finish its current GPU operation and acknowledge.
++            idleCondition.wait(lock, [&] { return idleQuiescent || !threadsRunning; });
++        }
++    }
++
+     void WorkloadQueue::waitForIdle() {
+         std::unique_lock<std::mutex> threadLock(threadMutex);
+     }
+@@ -1209,8 +1220,15 @@ namespace RT64 {
+             {
+                 std::unique_lock<std::mutex> idleLock(idleMutex);
+                 idleCondition.wait(idleLock, [&]() {
+-                    return idleActive || !threadsRunning;
++                    return idleActive || quiescenceRequested || !threadsRunning;
+                 });
++                if (quiescenceRequested) {
++                    idleQuiescent = true;
++                    idleCondition.notify_all();
++                    idleCondition.wait(idleLock, [&] { return !quiescenceRequested || !threadsRunning; });
++                    idleQuiescent = false;
++                }
++                if (!idleActive && threadsRunning) continue;
+             }
+ 
+             if (threadsRunning) {
+diff --git a/src/hle/rt64_workload_queue.h b/src/hle/rt64_workload_queue.h
+index bde2f03..1c3f7e8 100644
+--- a/src/hle/rt64_workload_queue.h
++++ b/src/hle/rt64_workload_queue.h
+@@ -74,6 +74,8 @@ namespace RT64 {
+         std::thread *renderThread = nullptr;
+         std::thread *idleThread = nullptr;
+         bool idleActive = false;
++        bool quiescenceRequested = false;
++        bool idleQuiescent = false;
+         std::mutex idleMutex;
+         std::condition_variable idleCondition;
+         std::mutex workerMutex;
+@@ -108,6 +110,7 @@ namespace RT64 {
+         void repeatLastWorkload();
+         uint32_t previousWriteCursor() const;
+         void waitForIdle();
++        void setQuiescence(bool requested);
+         void waitForWorkloadId(uint64_t waitId);
+         void setup(const External &ext);
+         void updateMultisampling();
+diff --git a/src/shaders/FbWriteColorCS.hlsl b/src/shaders/FbWriteColorCS.hlsl
+index cbc9418..f3cfa16 100644
+--- a/src/shaders/FbWriteColorCS.hlsl
++++ b/src/shaders/FbWriteColorCS.hlsl
+@@ -14,7 +14,21 @@ void CSMain(uint2 coord : SV_DispatchThreadID) {
+     if ((coord.x < gConstants.resolution.x) && (coord.y < gConstants.resolution.y)) {
+         uint2 offsetCoord = gConstants.offset + coord;
+         uint dstIndex = offsetCoord.y * gConstants.resolution.x + offsetCoord.x;
+-        float4 color = gInput.Load(uint3(offsetCoord, 0));
++        uint inW, inH;
++        gInput.GetDimensions(inW, inH);
++        uint2 inCoord;
++        if (inW * gConstants.resolution.y > inH * gConstants.resolution.x) {
++            uint activeW = (inH * gConstants.resolution.x) / gConstants.resolution.y;
++            uint xOffset = (inW - activeW) / 2;
++            inCoord = uint2(xOffset + (offsetCoord.x * activeW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        } else if (inW * gConstants.resolution.y < inH * gConstants.resolution.x) {
++            uint activeH = (inW * gConstants.resolution.y) / gConstants.resolution.x;
++            uint yOffset = (inH - activeH) / 2;
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, yOffset + (offsetCoord.y * activeH) / gConstants.resolution.y);
++        } else {
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        }
++        float4 color = gInput.Load(uint3(inCoord, 0));
+         bool oddColumn = (offsetCoord.x & 1);
+         uint randomSeed = initRand(gConstants.ditherRandomSeed, dstIndex, 16);
+         uint ditherValue = DitherPatternValue(gConstants.ditherPattern, offsetCoord, randomSeed);
+diff --git a/src/shaders/FbWriteDepthCS.hlsl b/src/shaders/FbWriteDepthCS.hlsl
+index 5ee043f..12b54f2 100644
+--- a/src/shaders/FbWriteDepthCS.hlsl
++++ b/src/shaders/FbWriteDepthCS.hlsl
+@@ -19,9 +19,37 @@ void CSMain(uint2 coord : SV_DispatchThreadID) {
+         uint2 offsetCoord = gConstants.offset + coord;
+         uint dstIndex = offsetCoord.y * gConstants.resolution.x + offsetCoord.x;
+ #   ifdef MULTISAMPLING
+-        float inputDepth = gInput.Load(offsetCoord, 0);
+-#else
+-        float inputDepth = gInput.Load(uint3(offsetCoord, 0));
++        uint inW, inH, inSamples;
++        gInput.GetDimensions(inW, inH, inSamples);
++        uint2 inCoord;
++        if (inW * gConstants.resolution.y > inH * gConstants.resolution.x) {
++            uint activeW = (inH * gConstants.resolution.x) / gConstants.resolution.y;
++            uint xOffset = (inW - activeW) / 2;
++            inCoord = uint2(xOffset + (offsetCoord.x * activeW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        } else if (inW * gConstants.resolution.y < inH * gConstants.resolution.x) {
++            uint activeH = (inW * gConstants.resolution.y) / gConstants.resolution.x;
++            uint yOffset = (inH - activeH) / 2;
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, yOffset + (offsetCoord.y * activeH) / gConstants.resolution.y);
++        } else {
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        }
++        float inputDepth = gInput.Load(inCoord, 0);
++#   else
++        uint inW, inH;
++        gInput.GetDimensions(inW, inH);
++        uint2 inCoord;
++        if (inW * gConstants.resolution.y > inH * gConstants.resolution.x) {
++            uint activeW = (inH * gConstants.resolution.x) / gConstants.resolution.y;
++            uint xOffset = (inW - activeW) / 2;
++            inCoord = uint2(xOffset + (offsetCoord.x * activeW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        } else if (inW * gConstants.resolution.y < inH * gConstants.resolution.x) {
++            uint activeH = (inW * gConstants.resolution.y) / gConstants.resolution.x;
++            uint yOffset = (inH - activeH) / 2;
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, yOffset + (offsetCoord.y * activeH) / gConstants.resolution.y);
++        } else {
++            inCoord = uint2((offsetCoord.x * inW) / gConstants.resolution.x, (offsetCoord.y * inH) / gConstants.resolution.y);
++        }
++        float inputDepth = gInput.Load(uint3(inCoord, 0));
+ #   endif
+         float z = clamp(inputDepth, 0.0f, 1.0f);
+         float dz = 0.0f; // TODO

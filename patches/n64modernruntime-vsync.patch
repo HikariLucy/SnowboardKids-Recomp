@@ -1,0 +1,38 @@
+diff --git a/ultramodern/include/ultramodern/config.hpp b/ultramodern/include/ultramodern/config.hpp
+index a7dbb73..e8fd5b5 100644
+--- a/ultramodern/include/ultramodern/config.hpp
++++ b/ultramodern/include/ultramodern/config.hpp
+@@ -62,6 +62,13 @@ namespace ultramodern {
+             Off,
+             OptionCount
+         };
++        // Host presentation sync only; never affects VI timing or the game's frame rate.
++        // On is first so a value-initialized config keeps the display-synchronized default.
++        enum class VSync {
++            On,
++            Off,
++            OptionCount
++        };
+         enum class PresentationMode {
+             Console,
+             SkipBuffering,
+@@ -81,6 +88,7 @@ namespace ultramodern {
+             HighPrecisionFramebuffer hpfb_option;
+             int rr_manual_value;
+             int ds_option;
++            VSync vsync_option;
+ 
+             virtual ~GraphicsConfig() = default;
+ 
+@@ -137,6 +145,11 @@ namespace ultramodern {
+             {ultramodern::renderer::RefreshRate::Manual, "Manual"},
+         });
+ 
++        NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::VSync, {
++            {ultramodern::renderer::VSync::On, "On"},
++            {ultramodern::renderer::VSync::Off, "Off"},
++        });
++
+         NLOHMANN_JSON_SERIALIZE_ENUM(ultramodern::renderer::HighPrecisionFramebuffer, {
+             {ultramodern::renderer::HighPrecisionFramebuffer::Auto, "Auto"},
+             {ultramodern::renderer::HighPrecisionFramebuffer::On, "On"},

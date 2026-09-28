@@ -1,0 +1,576 @@
+diff --git a/recompui/include/recompui/renderer.h b/recompui/include/recompui/renderer.h
+index 33f79ab..16ee1e9 100644
+--- a/recompui/include/recompui/renderer.h
++++ b/recompui/include/recompui/renderer.h
+@@ -30,6 +30,15 @@ namespace recompui {
+             void send_dummy_workload(uint32_t fb_address) override;
+             void update_screen() override;
+             void shutdown() override;
++            bool drain_for_quiescence() override;
++            void resume_from_quiescence() override;
++            bool export_semantic_state(std::vector<uint8_t>& out_blob) override;
++            bool reset_semantic_state() override;
++            bool import_semantic_state(const uint8_t* data, size_t size) override;
++            bool present_restored_frame() override;
++            bool capture_framebuffer_hash(uint64_t* out_hash) override;
++            bool readback_gpu_target(bool depth, std::vector<uint8_t>& out_pixels, uint64_t* out_hash) override;
++            bool get_rdram_framebuffer_hash(bool depth, uint64_t* out_hash) override;
+             uint32_t get_display_framerate() const override;
+             float get_resolution_scale() const override;
+ 
+@@ -38,6 +47,7 @@ namespace recompui {
+             std::unordered_set<std::string> enabled_texture_packs;
+             std::unordered_set<std::string> secondary_disabled_texture_packs;
+             uint32_t last_refresh_rate = 0;
++            bool quiescent = false;
+ 
+             void check_texture_pack_actions();
+             void check_refresh_rate_changes();
+diff --git a/recompui/src/renderer/rt64_presentation_history.h b/recompui/src/renderer/rt64_presentation_history.h
+new file mode 100644
+index 0000000..cfec278
+--- /dev/null
++++ b/recompui/src/renderer/rt64_presentation_history.h
+@@ -0,0 +1,32 @@
++#pragma once
++
++#include <mutex>
++
++#include "common/rt64_user_configuration.h"
++#include "hle/rt64_shared_queue_resources.h"
++
++namespace recompui::renderer {
++    // Host presentation history is never restored: the next frame after a
++    // restore is one presentable, non-interpolated frame. RT64's present/workload
++    // handshake requires every counter set to describe at least one display frame
++    // (the workload queue asserts displayFrames > 0). A zeroed set makes the
++    // present queue present zero frames for an interpolation candidate and never
++    // publish its presentId, so the next workload waits on it forever. Color
++    // images of the pre-restore workload no longer exist and must not select
++    // that path. Callers hold the renderer quiescent.
++    inline void reset_shared_presentation_history(RT64::SharedQueueResources &shared) {
++        {
++            std::scoped_lock<std::mutex> lock(shared.managerMutex);
++            shared.colorImageAddressVector.clear();
++            shared.colorImageAddressSet.clear();
++            shared.interpolatedColorTargets.clear();
++        }
++        {
++            std::scoped_lock<std::mutex> lock(shared.interpolatedMutex);
++            for (auto &counters : shared.interpolatedFrames) {
++                counters = {};
++                counters.count = 1;
++            }
++        }
++    }
++}
+diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
+index f8f8089..e583a00 100644
+--- a/recompui/src/renderer/rt64_render_context.cpp
++++ b/recompui/src/renderer/rt64_render_context.cpp
+@@ -1,9 +1,17 @@
++#include "quiescence/quiescence.hpp"
++#include "quiescence/renderer_state.hpp"
++#include "xxHash/xxh3.h"
+ #include <memory>
+ #include <cstring>
+ #include <variant>
+ #include <algorithm>
+ 
+ #include "hle/rt64_application.h"
++#include "hle/rt64_state.h"
++#include "hle/rt64_rdp.h"
++#include "hle/rt64_framebuffer.h"
++#include "hle/rt64_framebuffer_manager.h"
++#include "rt64_presentation_history.h"
+ #include "rt64_render_hooks.h"
+ #include "overloaded.h"
+ 
+@@ -352,6 +360,487 @@ void renderer::RT64Context::update_screen() {
+     app->updateScreen();
+ }
+ 
++bool renderer::RT64Context::drain_for_quiescence() {
++    app->workloadQueue->waitForWorkloadId(app->state->workloadId);
++    app->presentQueue->waitForPresentId(app->state->presentId);
++    app->workloadQueue->waitForIdle();
++    app->presentQueue->waitForIdle();
++    app->workloadQueue->setQuiescence(true);
++    quiescent = true;
++    sbk::quiescence::note("renderer-idle", "park-ack");
++    // CPU queue IDs may advance before the final GPU submission finishes.
++    // Idle submissions are now parked; fence waits hold no renderer locks.
++    auto fence_queue = [&](RT64::RenderWorker* worker, const char* participant) {
++        // Plume's Vulkan wait resets a fence. Re-waiting a worker's already
++        // consumed fence (or an unused worker) deadlocks. Submit a fresh empty
++        // command list and private fence after all accepted work instead.
++        auto marker = worker->commandQueue->createCommandList();
++        auto fence = app->device->createCommandFence();
++        marker->begin();
++        marker->end();
++        worker->commandQueue->executeCommandLists(marker.get(), fence.get());
++        worker->commandQueue->waitForCommandFence(fence.get());
++        sbk::quiescence::note(participant, "fence-ack");
++    };
++    fence_queue(app->workloadGraphicsWorker.get(), "gpu-workload");
++    fence_queue(app->presentGraphicsWorker.get(), "gpu-present");
++    fence_queue(app->framebufferGraphicsWorker.get(), "gpu-framebuffer");
++    sbk::quiescence::note("renderer-gpu", "fences-complete");
++    return true;
++}
++
++void renderer::RT64Context::resume_from_quiescence() {
++    if (!quiescent) return;
++    quiescent = false;
++    sbk::quiescence::note("renderer-idle", "resume");
++    app->workloadQueue->setQuiescence(false);
++}
++
++bool renderer::RT64Context::export_semantic_state(std::vector<uint8_t>& out_blob) {
++    if (!app || !app->state || !app->state->rdp) return false;
++
++    sbk::quiescence::SemanticStateHeader header{};
++    header.magic = sbk::quiescence::SEMANTIC_STATE_MAGIC;
++    header.version = sbk::quiescence::SEMANTIC_STATE_VERSION;
++    header.generation = sbk::quiescence::status().generation;
++
++    auto* rdp = app->state->rdp.get();
++    std::memcpy(header.rdp.tmem, rdp->TMEM, 4096);
++    for (int i = 0; i < 8; ++i) {
++        header.rdp.tiles[i].fmt = rdp->tiles[i].fmt;
++        header.rdp.tiles[i].siz = rdp->tiles[i].siz;
++        header.rdp.tiles[i].line = rdp->tiles[i].line;
++        header.rdp.tiles[i].tmem = rdp->tiles[i].tmem;
++        header.rdp.tiles[i].palette = rdp->tiles[i].palette;
++        header.rdp.tiles[i].cmt = rdp->tiles[i].cmt;
++        header.rdp.tiles[i].cms = rdp->tiles[i].cms;
++        header.rdp.tiles[i].maskt = rdp->tiles[i].maskt;
++        header.rdp.tiles[i].masks = rdp->tiles[i].masks;
++        header.rdp.tiles[i].shiftt = rdp->tiles[i].shiftt;
++        header.rdp.tiles[i].shifts = rdp->tiles[i].shifts;
++        header.rdp.tiles[i].uls = rdp->tiles[i].uls;
++        header.rdp.tiles[i].ult = rdp->tiles[i].ult;
++        header.rdp.tiles[i].lrs = rdp->tiles[i].lrs;
++        header.rdp.tiles[i].lrt = rdp->tiles[i].lrt;
++        header.rdp.tiles[i].replacement_hash = rdp->tileReplacementHashes[i];
++    }
++    header.rdp.texture_fmt = rdp->texture.fmt;
++    header.rdp.texture_siz = rdp->texture.siz;
++    header.rdp.texture_width = rdp->texture.width;
++    header.rdp.texture_address = rdp->texture.address;
++
++    header.rdp.color_image_address = rdp->colorImage.address;
++    header.rdp.color_image_fmt = rdp->colorImage.fmt;
++    header.rdp.color_image_siz = rdp->colorImage.siz;
++    header.rdp.color_image_width = rdp->colorImage.width;
++
++    header.rdp.depth_image_address = rdp->depthImage.address;
++
++    header.rdp.other_mode_h = rdp->otherMode.H;
++    header.rdp.other_mode_l = rdp->otherMode.L;
++
++    header.rdp.combiner_cycle1 = rdp->colorCombinerStack[0].L;
++    header.rdp.combiner_cycle2 = rdp->colorCombinerStack[0].H;
++
++    std::memcpy(header.rdp.env_color, &rdp->envColorStack[0], sizeof(float) * 4);
++    std::memcpy(header.rdp.prim_color, &rdp->primColorStack[0], sizeof(float) * 4);
++    std::memcpy(header.rdp.prim_lod, &rdp->primLODStack[0], sizeof(float) * 2);
++    std::memcpy(header.rdp.prim_depth, &rdp->primDepthStack[0], sizeof(float) * 2);
++    std::memcpy(header.rdp.blend_color, &rdp->blendColorStack[0], sizeof(float) * 4);
++    std::memcpy(header.rdp.fog_color, &rdp->fogColorStack[0], sizeof(float) * 4);
++    header.rdp.fill_color = rdp->fillColorStack[0];
++
++    header.rdp.scissor_ulx = rdp->scissorRectStack[0].ulx;
++    header.rdp.scissor_uly = rdp->scissorRectStack[0].uly;
++    header.rdp.scissor_lrx = rdp->scissorRectStack[0].lrx;
++    header.rdp.scissor_lry = rdp->scissorRectStack[0].lry;
++    header.rdp.scissor_mode = rdp->scissorModeStack[0];
++
++    std::memcpy(header.rdp.convert_k, rdp->convertK, sizeof(int32_t) * 6);
++    std::memcpy(header.rdp.key_center, &rdp->keyCenter, sizeof(float) * 3);
++    std::memcpy(header.rdp.key_scale, &rdp->keyScale, sizeof(float) * 3);
++
++    const auto& vi = app->state->lastScreenVI;
++    header.vi.status = vi.status.word;
++    header.vi.origin = vi.origin;
++    header.vi.width = vi.width;
++    header.vi.v_intr = vi.intr;
++    header.vi.v_current = vi.vCurrentLine;
++    header.vi.burst = vi.burst.word;
++    header.vi.v_sync = vi.vSync;
++    header.vi.h_sync = vi.hSync.word;
++    header.vi.leap = vi.leap.word;
++    header.vi.h_sync_leap = 0;
++    header.vi.h_video = vi.hRegion.word;
++    header.vi.v_video = vi.vRegion.word;
++    header.vi.v_burst = vi.vBurst.word;
++    header.vi.x_scale = vi.xTransform.word;
++    header.vi.y_scale = vi.yTransform.word;
++
++    struct SerializedFb {
++        sbk::quiescence::SemanticFramebufferHeader hdr;
++        std::vector<uint8_t> pixels;
++    };
++    std::vector<SerializedFb> fbs;
++
++    uint32_t screen_addr = vi.fbAddress();
++    auto screen_size = vi.fbSize();
++    uint8_t screen_siz = vi.fbSiz();
++    if (screen_size.x > 0 && screen_size.y > 0 && screen_siz >= G_IM_SIZ_16b && screen_addr < 0x800000) {
++        uint32_t screen_bytes = (uint32_t(screen_size.x * screen_size.y) << (screen_siz - 1));
++        if (screen_addr + screen_bytes <= 0x800000) {
++            SerializedFb sfb{};
++            sfb.hdr.address = screen_addr;
++            sfb.hdr.width = screen_size.x;
++            sfb.hdr.height = screen_size.y;
++            sfb.hdr.siz = screen_siz;
++            sfb.hdr.fmt = G_IM_FMT_RGBA;
++            sfb.hdr.type = 1; // Color
++            sfb.hdr.pixel_bytes = screen_bytes;
++            std::vector<uint8_t> gpu_color;
++            if (readback_gpu_target(false, gpu_color, nullptr) && gpu_color.size() == screen_bytes) {
++                sfb.pixels = std::move(gpu_color);
++            } else {
++                sfb.pixels.resize(screen_bytes);
++                std::memcpy(sfb.pixels.data(), &app->core.RDRAM[screen_addr], screen_bytes);
++            }
++            fbs.push_back(std::move(sfb));
++        }
++    }
++
++    uint32_t depth_addr = rdp->depthImage.address;
++    if (depth_addr > 0 && depth_addr < 0x800000 && screen_size.x > 0 && screen_size.y > 0) {
++        uint32_t depth_bytes = screen_size.x * screen_size.y * 2;
++        if (depth_addr + depth_bytes <= 0x800000) {
++            SerializedFb dfb{};
++            dfb.hdr.address = depth_addr;
++            dfb.hdr.width = screen_size.x;
++            dfb.hdr.height = screen_size.y;
++            dfb.hdr.siz = G_IM_SIZ_16b;
++            dfb.hdr.fmt = G_IM_FMT_DEPTH;
++            dfb.hdr.type = 2; // Depth
++            dfb.hdr.pixel_bytes = depth_bytes;
++            std::vector<uint8_t> gpu_depth;
++            if (readback_gpu_target(true, gpu_depth, nullptr) && gpu_depth.size() == depth_bytes) {
++                dfb.pixels = std::move(gpu_depth);
++            } else {
++                dfb.pixels.resize(depth_bytes);
++                std::memcpy(dfb.pixels.data(), &app->core.RDRAM[depth_addr], depth_bytes);
++            }
++            fbs.push_back(std::move(dfb));
++        }
++    }
++
++    header.framebuffer_count = static_cast<uint32_t>(fbs.size());
++
++    out_blob.clear();
++    const uint8_t* hptr = reinterpret_cast<const uint8_t*>(&header);
++    out_blob.insert(out_blob.end(), hptr, hptr + sizeof(header));
++    for (const auto& fb : fbs) {
++        const uint8_t* fb_hdr_ptr = reinterpret_cast<const uint8_t*>(&fb.hdr);
++        out_blob.insert(out_blob.end(), fb_hdr_ptr, fb_hdr_ptr + sizeof(fb.hdr));
++        out_blob.insert(out_blob.end(), fb.pixels.begin(), fb.pixels.end());
++    }
++
++    sbk::quiescence::note("renderer-semantic", "export", out_blob.size());
++    return true;
++}
++
++static void reset_presentation_history(RT64::Application* app) {
++    renderer::reset_shared_presentation_history(*app->sharedQueueResources);
++    app->state->viHistory = RT64::VIHistory();
++    app->presentQueue->viHistory = RT64::VIHistory();
++    app->state->lastScreenFactorCounter = 0;
++}
++
++bool renderer::RT64Context::reset_semantic_state() {
++    if (!app || !app->state) return false;
++
++    app->state->rdp->reset();
++    app->state->framebufferManager.destroyAllTileCopies();
++    app->sharedQueueResources->framebufferManager.destroyAllTileCopies();
++
++    if (app->state->renderFramebufferManager) {
++        app->state->renderFramebufferManager->destroyAll();
++    }
++
++    reset_presentation_history(app.get());
++
++    sbk::quiescence::note("renderer-semantic", "reset");
++    return true;
++}
++
++bool renderer::RT64Context::import_semantic_state(const uint8_t* data, size_t size) {
++    if (!app || !app->state || !app->state->rdp || !data) return false;
++    if (size < sizeof(sbk::quiescence::SemanticStateHeader)) return false;
++
++    sbk::quiescence::SemanticStateHeader header;
++    std::memcpy(&header, data, sizeof(header));
++    if (header.magic != sbk::quiescence::SEMANTIC_STATE_MAGIC || header.version != sbk::quiescence::SEMANTIC_STATE_VERSION) {
++        return false;
++    }
++
++    auto* rdp = app->state->rdp.get();
++    std::memcpy(rdp->TMEM, header.rdp.tmem, 4096);
++    for (int i = 0; i < 8; ++i) {
++        rdp->tiles[i].fmt = header.rdp.tiles[i].fmt;
++        rdp->tiles[i].siz = header.rdp.tiles[i].siz;
++        rdp->tiles[i].line = header.rdp.tiles[i].line;
++        rdp->tiles[i].tmem = header.rdp.tiles[i].tmem;
++        rdp->tiles[i].palette = header.rdp.tiles[i].palette;
++        rdp->tiles[i].cmt = header.rdp.tiles[i].cmt;
++        rdp->tiles[i].cms = header.rdp.tiles[i].cms;
++        rdp->tiles[i].maskt = header.rdp.tiles[i].maskt;
++        rdp->tiles[i].masks = header.rdp.tiles[i].masks;
++        rdp->tiles[i].shiftt = header.rdp.tiles[i].shiftt;
++        rdp->tiles[i].shifts = header.rdp.tiles[i].shifts;
++        rdp->tiles[i].uls = header.rdp.tiles[i].uls;
++        rdp->tiles[i].ult = header.rdp.tiles[i].ult;
++        rdp->tiles[i].lrs = header.rdp.tiles[i].lrs;
++        rdp->tiles[i].lrt = header.rdp.tiles[i].lrt;
++        rdp->tileReplacementHashes[i] = header.rdp.tiles[i].replacement_hash;
++    }
++    rdp->texture.fmt = header.rdp.texture_fmt;
++    rdp->texture.siz = header.rdp.texture_siz;
++    rdp->texture.width = header.rdp.texture_width;
++    rdp->texture.address = header.rdp.texture_address;
++
++    rdp->colorImage.address = header.rdp.color_image_address;
++    rdp->colorImage.fmt = header.rdp.color_image_fmt;
++    rdp->colorImage.siz = header.rdp.color_image_siz;
++    rdp->colorImage.width = header.rdp.color_image_width;
++
++    rdp->depthImage.address = header.rdp.depth_image_address;
++
++    rdp->otherMode.H = header.rdp.other_mode_h;
++    rdp->otherMode.L = header.rdp.other_mode_l;
++
++    rdp->colorCombinerStack[0].L = static_cast<uint32_t>(header.rdp.combiner_cycle1);
++    rdp->colorCombinerStack[0].H = static_cast<uint32_t>(header.rdp.combiner_cycle2);
++
++    std::memcpy(&rdp->envColorStack[0], header.rdp.env_color, sizeof(float) * 4);
++    std::memcpy(&rdp->primColorStack[0], header.rdp.prim_color, sizeof(float) * 4);
++    std::memcpy(&rdp->primLODStack[0], header.rdp.prim_lod, sizeof(float) * 2);
++    std::memcpy(&rdp->primDepthStack[0], header.rdp.prim_depth, sizeof(float) * 2);
++    std::memcpy(&rdp->blendColorStack[0], header.rdp.blend_color, sizeof(float) * 4);
++    std::memcpy(&rdp->fogColorStack[0], header.rdp.fog_color, sizeof(float) * 4);
++    rdp->fillColorStack[0] = header.rdp.fill_color;
++
++    rdp->scissorRectStack[0].ulx = header.rdp.scissor_ulx;
++    rdp->scissorRectStack[0].uly = header.rdp.scissor_uly;
++    rdp->scissorRectStack[0].lrx = header.rdp.scissor_lrx;
++    rdp->scissorRectStack[0].lry = header.rdp.scissor_lry;
++    rdp->scissorModeStack[0] = header.rdp.scissor_mode;
++
++    std::memcpy(rdp->convertK, header.rdp.convert_k, sizeof(int32_t) * 6);
++    std::memcpy(&rdp->keyCenter, header.rdp.key_center, sizeof(float) * 3);
++    std::memcpy(&rdp->keyScale, header.rdp.key_scale, sizeof(float) * 3);
++
++    auto& vi = app->state->lastScreenVI;
++    vi.status.word = header.vi.status;
++    vi.origin = header.vi.origin;
++    vi.width = header.vi.width;
++    vi.intr = header.vi.v_intr;
++    vi.vCurrentLine = header.vi.v_current;
++    vi.burst.word = header.vi.burst;
++    vi.vSync = header.vi.v_sync;
++    vi.hSync.word = header.vi.h_sync;
++    vi.leap.word = header.vi.leap;
++    vi.hRegion.word = header.vi.h_video;
++    vi.vRegion.word = header.vi.v_video;
++    vi.vBurst.word = header.vi.v_burst;
++    vi.xTransform.word = header.vi.x_scale;
++    vi.yTransform.word = header.vi.y_scale;
++
++    size_t offset = sizeof(header);
++    for (uint32_t i = 0; i < header.framebuffer_count; ++i) {
++        if (offset + sizeof(sbk::quiescence::SemanticFramebufferHeader) > size) break;
++        sbk::quiescence::SemanticFramebufferHeader fb_hdr;
++        std::memcpy(&fb_hdr, data + offset, sizeof(fb_hdr));
++        offset += sizeof(fb_hdr);
++
++        if (offset + fb_hdr.pixel_bytes > size) break;
++        const uint8_t* pixels = data + offset;
++        offset += fb_hdr.pixel_bytes;
++
++        auto fbType = (fb_hdr.type == 1) ? RT64::Framebuffer::Type::Color : RT64::Framebuffer::Type::Depth;
++        auto& fb = app->sharedQueueResources->framebufferManager.get(fb_hdr.address, fb_hdr.siz, fb_hdr.width, fb_hdr.height);
++        fb.lastWriteType = fbType;
++        fb.lastWriteFmt = fb_hdr.fmt;
++
++        RT64::RenderTargetKey targetKey(fb_hdr.address, fb_hdr.width, fb_hdr.siz, fbType);
++        auto& target = app->sharedQueueResources->renderTargetManager.get(targetKey, true);
++        if (target.isEmpty()) {
++            hlslpp::float2 resScale = app->sharedQueueResources->resolutionScale;
++            uint32_t targetW = 0, targetH = 0, misalignX = 0;
++            RT64::RenderTarget::computeScaledSize(fb_hdr.width, fb_hdr.height, resScale, targetW, targetH, misalignX);
++            target.resize(app->framebufferGraphicsWorker.get(), targetW, targetH);
++            target.resolutionScale = resScale;
++            target.downsampleMultiplier = app->userConfig.downsampleMultiplier;
++        }
++
++        {
++            RT64::RenderWorkerExecution execution(app->framebufferGraphicsWorker.get());
++            if (fbType == RT64::Framebuffer::Type::Color) {
++                target.clearColorTarget(app->framebufferGraphicsWorker.get());
++            }
++            else {
++                target.clearDepthTarget(app->framebufferGraphicsWorker.get());
++            }
++            RT64::FramebufferChange* change = fb.readChangeFromBytes(app->framebufferGraphicsWorker.get(),
++                app->presentQueue->screenFbChangePool, fbType, fb_hdr.fmt,
++                pixels, 0, fb_hdr.height, app->shaderLibrary.get());
++            if (change != nullptr) {
++                target.copyFromChanges(app->framebufferGraphicsWorker.get(), *change, fb_hdr.width, fb_hdr.height, 0, app->shaderLibrary.get());
++            }
++        }
++
++        if (fb_hdr.address + fb_hdr.pixel_bytes <= 0x800000) {
++            uint64_t ram_h = XXH3_64bits(&app->core.RDRAM[fb_hdr.address], fb_hdr.pixel_bytes);
++            fb.RAMBytes = fb_hdr.pixel_bytes;
++            fb.RAMHash = ram_h;
++            auto& stateFb = app->state->framebufferManager.get(fb_hdr.address, fb_hdr.siz, fb_hdr.width, fb_hdr.height);
++            stateFb.lastWriteType = fbType;
++            stateFb.lastWriteFmt = fb_hdr.fmt;
++            stateFb.RAMBytes = fb_hdr.pixel_bytes;
++            stateFb.RAMHash = ram_h;
++        }
++    }
++
++    uint32_t vi_fb_addr = vi.fbAddress();
++    auto vi_sz = vi.fbSize();
++    uint8_t vi_siz = vi.fbSiz();
++    if (vi_sz.x > 0 && vi_sz.y > 0 && vi_siz >= G_IM_SIZ_16b && vi_fb_addr < 0x800000) {
++        uint32_t vi_bytes = (uint32_t(vi_sz.x * vi_sz.y) << (vi_siz - 1));
++        if (vi_fb_addr + vi_bytes <= 0x800000) {
++            app->state->lastScreenHash = XXH3_64bits(&app->core.RDRAM[vi_fb_addr], vi_bytes);
++        }
++    }
++
++    reset_presentation_history(app.get());
++
++    sbk::quiescence::note("renderer-semantic", "import", size);
++    return true;
++}
++
++bool renderer::RT64Context::present_restored_frame() {
++    if (!app || !app->presentQueue || !app->state) return false;
++    app->state->updateScreen(app->state->lastScreenVI, true);
++    app->presentQueue->waitForIdle();
++    sbk::quiescence::note("renderer-semantic", "present");
++    return true;
++}
++
++bool renderer::RT64Context::capture_framebuffer_hash(uint64_t* out_hash) {
++    if (!app || !app->state || !out_hash) return false;
++    const auto& vi = app->state->lastScreenVI;
++    uint32_t fb_addr = vi.fbAddress();
++    auto fb_size = vi.fbSize();
++    uint8_t fb_siz = vi.fbSiz();
++    if (fb_size.x == 0 || fb_size.y == 0 || fb_siz < G_IM_SIZ_16b || fb_addr >= 0x800000) {
++        *out_hash = 0;
++        return true;
++    }
++    uint32_t byte_count = (uint32_t(fb_size.x * fb_size.y) << (fb_siz - 1));
++    if (fb_addr + byte_count > 0x800000) byte_count = 0x800000 - fb_addr;
++    *out_hash = XXH3_64bits(&app->core.RDRAM[fb_addr], byte_count);
++    return true;
++}
++
++bool renderer::RT64Context::readback_gpu_target(bool depth, std::vector<uint8_t>& out_pixels, uint64_t* out_hash) {
++    if (!app || !app->state || !app->sharedQueueResources) return false;
++    if (app->workloadQueue) app->workloadQueue->waitForIdle();
++    if (app->presentQueue) app->presentQueue->waitForIdle();
++    const auto& vi = app->state->lastScreenVI;
++    auto fb_size = vi.fbSize();
++    uint8_t fb_siz = vi.fbSiz();
++    if (fb_size.x == 0 || fb_size.y == 0) return false;
++
++    uint32_t target_addr = 0;
++    uint8_t target_siz = fb_siz;
++    uint8_t target_fmt = G_IM_FMT_RGBA;
++    RT64::Framebuffer::Type fbType = RT64::Framebuffer::Type::Color;
++
++    if (!depth) {
++        target_addr = vi.fbAddress();
++        if (target_addr >= 0x800000 || target_siz < G_IM_SIZ_16b) return false;
++    } else {
++        target_addr = app->state->rdp ? app->state->rdp->depthImage.address : 0;
++        if (target_addr == 0 || target_addr >= 0x800000) return false;
++        target_siz = G_IM_SIZ_16b;
++        target_fmt = G_IM_FMT_DEPTH;
++        fbType = RT64::Framebuffer::Type::Depth;
++    }
++
++    uint32_t byte_count = (uint32_t(fb_size.x * fb_size.y) << (target_siz - 1));
++    if (target_addr + byte_count > 0x800000) byte_count = 0x800000 - target_addr;
++
++    RT64::RenderTarget* target = nullptr;
++
++    RT64::RenderTargetKey targetKey(target_addr, fb_size.x, target_siz, fbType);
++    auto& sharedTarget = app->sharedQueueResources->renderTargetManager.get(targetKey, true);
++    if (!sharedTarget.isEmpty()) {
++        target = &sharedTarget;
++    } else {
++        auto& stateTarget = app->state->renderTargetManager.get(targetKey, true);
++        if (!stateTarget.isEmpty()) {
++            target = &stateTarget;
++        }
++    }
++
++    if (!target || target->isEmpty()) {
++        if (out_hash) *out_hash = 0;
++        out_pixels.clear();
++        return false;
++    }
++
++    RT64::Framebuffer readbackFb;
++    readbackFb.addressStart = target_addr;
++    readbackFb.width = fb_size.x;
++    readbackFb.height = fb_size.y;
++    readbackFb.siz = target_siz;
++    readbackFb.nativeTarget.resetBufferHistory();
++
++    out_pixels.resize(byte_count);
++
++    {
++        RT64::RenderWorkerExecution execution(app->framebufferGraphicsWorker.get());
++        readbackFb.nativeTarget.copyToNative(app->framebufferGraphicsWorker.get(), target, fb_size.x, 0, fb_size.y, target_siz, target_fmt, 3, 0, app->shaderLibrary.get());
++    }
++
++    readbackFb.copyNativeToRAM(out_pixels.data(), fb_size.x, 0, fb_size.y);
++
++    if (out_hash) {
++        *out_hash = XXH3_64bits(out_pixels.data(), out_pixels.size());
++    }
++    return true;
++}
++
++bool renderer::RT64Context::get_rdram_framebuffer_hash(bool depth, uint64_t* out_hash) {
++    if (!app || !app->state || !out_hash) return false;
++    const auto& vi = app->state->lastScreenVI;
++    auto fb_size = vi.fbSize();
++    uint8_t fb_siz = vi.fbSiz();
++    if (fb_size.x == 0 || fb_size.y == 0) return false;
++
++    uint32_t addr = 0;
++    uint8_t siz = fb_siz;
++    if (!depth) {
++        addr = vi.fbAddress();
++        if (addr >= 0x800000 || siz < G_IM_SIZ_16b) return false;
++    } else {
++        addr = app->state->rdp ? app->state->rdp->depthImage.address : 0;
++        if (addr == 0 || addr >= 0x800000) return false;
++        siz = G_IM_SIZ_16b;
++    }
++
++    uint32_t byte_count = (uint32_t(fb_size.x * fb_size.y) << (siz - 1));
++    if (addr + byte_count > 0x800000) byte_count = 0x800000 - addr;
++
++    *out_hash = XXH3_64bits(&app->core.RDRAM[addr], byte_count);
++    return true;
++}
++
+ void renderer::RT64Context::shutdown() {
+     if (app != nullptr) {
+         app->end();

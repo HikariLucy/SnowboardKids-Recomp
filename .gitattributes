@@ -1,0 +1,3 @@
+# Dependency patch context lines reproduce upstream bytes, including
+# whitespace-only lines; they must not be "fixed".
+*.patch -whitespace

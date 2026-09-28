@@ -1,0 +1,514 @@
+diff --git a/recompinput/include/recompinput/device_label.h b/recompinput/include/recompinput/device_label.h
+new file mode 100644
+index 0000000..35f8d64
+--- /dev/null
++++ b/recompinput/include/recompinput/device_label.h
+@@ -0,0 +1,28 @@
++#pragma once
++
++#include <string>
++
++namespace recompinput {
++    // Disconnected: an assigned controller went away; the player stays neutral until
++    // re-assigned. NoController: single-player reads any controller and none is attached.
++    enum class DeviceLabelState { NotAssigned, Keyboard, Controller, Disconnected, NoController };
++
++    // Text shown under a player card. The name comes from SDL; a missing name is
++    // never replaced by a guessed brand. The state is spelled out in words so it
++    // never depends on color alone.
++    inline std::string device_label(DeviceLabelState state, const char* controller_name = nullptr) {
++        switch (state) {
++            case DeviceLabelState::NotAssigned:
++                return "Not assigned";
++            case DeviceLabelState::Keyboard:
++                return "Keyboard";
++            case DeviceLabelState::Controller:
++                return controller_name != nullptr && controller_name[0] != '\0' ? controller_name : "Controller";
++            case DeviceLabelState::Disconnected:
++                return "Disconnected - reconnect, then Re-assign Players";
++            case DeviceLabelState::NoController:
++                return "No controller connected";
++        }
++        return "Not assigned";
++    }
++}
+diff --git a/recompui/include/recompui/recompui.h b/recompui/include/recompui/recompui.h
+index 87caf66..332474e 100644
+--- a/recompui/include/recompui/recompui.h
++++ b/recompui/include/recompui/recompui.h
+@@ -97,6 +97,10 @@ namespace recompui {
+     void open_quit_game_prompt();
+     bool get_cursor_visible();
+     void set_cursor_visible(bool visible);
++    // Reduced motion: focus pulses hold a steady color and decorative spins, bounces
++    // and smooth scrolls stop. Game rendering is not affected.
++    void set_reduced_motion(bool enabled);
++    bool get_reduced_motion();
+     void update_supported_options();
+ 
+     bool get_cont_active(void);
+diff --git a/recompui/src/composites/ui_player_card.cpp b/recompui/src/composites/ui_player_card.cpp
+index d1f5459..9b31e39 100644
+--- a/recompui/src/composites/ui_player_card.cpp
++++ b/recompui/src/composites/ui_player_card.cpp
+@@ -1,4 +1,6 @@
+ #include "ui_player_card.h"
++#include "recompinput/device_label.h"
++#include "recompui/recompui.h"
+ #include "recompinput/recompinput.h"
+ #include "recompinput/profiles.h"
+ #include "elements/ui_label.h"
+@@ -80,6 +82,13 @@ PlayerCard::PlayerCard(ResourceId rid, Element* parent, int player_index, bool i
+     if (!is_assignment_card) {
+         update_player_card_icon();
+ 
++        // Refreshed on every update so hotplug never leaves a stale name.
++        current_device_label = get_device_label_text();
++        device_label = context.create_element<Label>(this, current_device_label, LabelStyle::Small);
++        device_label->set_debug_id("PlayerDeviceLabel");
++        device_label->set_width(100.0f, Unit::Percent);
++        queue_update();
++
+         auto profile_label = context.create_element<Label>(this, "Profile", LabelStyle::Small);
+ 
+         profile_label->set_margin_top(8.0f);
+@@ -168,6 +177,14 @@ void PlayerCard::process_event(const Event& e) {
+             if (uses_assignment_state()) {
+                 update_assignment_player_card();
+             }
++            if (device_label != nullptr) {
++                std::string label = get_device_label_text();
++                if (label != current_device_label) {
++                    current_device_label = std::move(label);
++                    device_label->set_text(current_device_label);
++                }
++                queue_update();
++            }
+             if (queue_focus_on_edit_profile_button) {
+                 queue_focus_on_edit_profile_button = false;
+                 if (edit_profile_button != nullptr) {
+@@ -193,6 +210,35 @@ void PlayerCard::on_edit_profile() {
+     }
+ }
+ 
++std::string PlayerCard::get_device_label_text() const {
++    using recompinput::DeviceLabelState;
++    switch (recompinput::profiles::get_assigned_input_device_for_player(player_index)) {
++        case recompinput::InputDevice::Keyboard:
++            return recompinput::device_label(DeviceLabelState::Keyboard);
++        case recompinput::InputDevice::Controller:
++            break;
++        default:
++            return recompinput::device_label(DeviceLabelState::NotAssigned);
++    }
++    if (recompinput::players::get_player_is_assigned(player_index)) {
++        SDL_GameController* controller = recompinput::players::get_player(player_index).controller;
++        if (controller == nullptr) {
++            return recompinput::device_label(DeviceLabelState::Keyboard);
++        }
++        if (!SDL_GameControllerGetAttached(controller)) {
++            return recompinput::device_label(DeviceLabelState::Disconnected);
++        }
++        return recompinput::device_label(DeviceLabelState::Controller, SDL_GameControllerName(controller));
++    }
++    // Single-player input reads every attached controller.
++    for (int i = 0; i < SDL_NumJoysticks(); i++) {
++        if (SDL_IsGameController(i)) {
++            return recompinput::device_label(DeviceLabelState::Controller, SDL_GameControllerNameForIndex(i));
++        }
++    }
++    return recompinput::device_label(DeviceLabelState::NoController);
++}
++
+ bool PlayerCard::uses_assignment_state() const {
+     return is_assignment_card || show_assignment_state;
+ }
+@@ -290,7 +336,7 @@ void PlayerCard::update_assignment_player_card() {
+ 
+     update_player_card_icon();
+ 
+-    if (cur_icon == PlayerCardIcon::Recording) {
++    if (cur_icon == PlayerCardIcon::Recording && !recompui::get_reduced_motion()) {
+         auto millis_since_start =
+             std::chrono::duration_cast<std::chrono::milliseconds>(ultramodern::time_since_start()).count();
+         icon->set_rotation(millis_since_start * 0.001f * 360.0f / 2.0f);
+@@ -359,7 +405,7 @@ void PlayerCard::update_assignment_player_card() {
+         static_cast<float>(std::chrono::duration_cast<std::chrono::milliseconds>(time_since_last_button_press).count());
+     float seconds = millis / 1000.0f;
+ 
+-    if (seconds > 0 && seconds < scale_anim_duration) {
++    if (seconds > 0 && seconds < scale_anim_duration && !recompui::get_reduced_motion()) {
+         float t = 1.0f - (seconds / scale_anim_duration);
+         float scale = 1.0f + t * 0.15f;
+         icon->set_scale_2D(scale, scale);
+diff --git a/recompui/src/composites/ui_player_card.h b/recompui/src/composites/ui_player_card.h
+index bc52519..1e91e01 100644
+--- a/recompui/src/composites/ui_player_card.h
++++ b/recompui/src/composites/ui_player_card.h
+@@ -6,6 +6,7 @@
+ #include "elements/ui_button.h"
+ #include "elements/ui_pill_button.h"
+ #include "elements/ui_select.h"
++#include "elements/ui_label.h"
+ 
+ namespace recompui {
+ 
+@@ -38,6 +39,8 @@ class PlayerCard : public Element {
+     bool force_instant_scroll = false;
+     PlayerCardVisualStyle visual_style = PlayerCardVisualStyle::Default;
+     Element* assignment_player_label = nullptr;
++    Label* device_label = nullptr;
++    std::string current_device_label;
+ 
+     on_select_player_profile_callback on_select_profile_callback;
+     on_edit_player_profile_callback on_edit_profile_callback;
+@@ -52,6 +55,7 @@ class PlayerCard : public Element {
+     void on_edit_profile();
+     void create_add_multiplayer_pill();
+     bool uses_assignment_state() const;
++    std::string get_device_label_text() const;
+     void set_profile_controls_enabled(bool enabled);
+ 
+   public:
+diff --git a/recompui/src/config/ui_config_page_controls.cpp b/recompui/src/config/ui_config_page_controls.cpp
+index 9847bca..d876510 100644
+--- a/recompui/src/config/ui_config_page_controls.cpp
++++ b/recompui/src/config/ui_config_page_controls.cpp
+@@ -9,6 +9,7 @@
+ #include "elements/ui_select.h"
+ #include "recompinput/profiles.h"
+ #include "recompui/config.h"
++#include "recompui/recompui.h"
+ 
+ namespace recompui {
+ 
+@@ -584,8 +585,20 @@ void ConfigPageControls::render_footer() {
+         footer_right->clear_children();
+         auto reset_to_defaults_button = context.create_element<Button>(footer_right, "Reset to defaults", ButtonStyle::Warning);
+         reset_to_defaults_button->add_pressed_callback([this]() {
+-            recompinput::profiles::reset_profile_bindings(this->selected_profile_index, this->get_player_input_device());
+-            this->update_control_mappings();
++            // Destructive for every binding in the profile: confirm first, focus on Cancel.
++            const int profile_index = this->selected_profile_index;
++            const recompinput::InputDevice device = this->get_player_input_device();
++            recompui::open_choice_prompt(
++                "Reset controls?",
++                "Every binding in \"" + recompinput::profiles::get_input_profile_name(profile_index) +
++                    "\" returns to its default. This cannot be undone.",
++                "Reset", "Cancel",
++                [this, profile_index, device]() {
++                    recompinput::profiles::reset_profile_bindings(profile_index, device);
++                    this->update_control_mappings();
++                },
++                []() {},
++                ButtonStyle::Warning, ButtonStyle::Secondary, true);
+         });
+     }
+ }
+diff --git a/recompui/src/config/ui_config_tab_general.cpp b/recompui/src/config/ui_config_tab_general.cpp
+index 296ce0e..cad8779 100644
+--- a/recompui/src/config/ui_config_tab_general.cpp
++++ b/recompui/src/config/ui_config_tab_general.cpp
+@@ -122,10 +122,12 @@ namespace config {
+             );
+         }
+ 
+-        config.add_percent_number_option(
++        // The radial deadzone (recompinput/deadzone.h) clamps at 95%; offer only that range.
++        config.add_number_option(
+             general::options::joystick_deadzone,
+             "Joystick Deadzone",
+-            "Applies a deadzone to joystick inputs.",
++            "Stick movement smaller than this is ignored. Raise it if the rider drifts with the stick released.",
++            0.0, 95.0, 1.0, 0, true,
+             5.0
+         );
+ 
+diff --git a/recompui/src/config/ui_config_tab_sound.cpp b/recompui/src/config/ui_config_tab_sound.cpp
+index ecdd7cc..2f577ff 100644
+--- a/recompui/src/config/ui_config_tab_sound.cpp
++++ b/recompui/src/config/ui_config_tab_sound.cpp
+@@ -28,8 +28,8 @@ namespace config {
+ 
+         config.add_percent_number_option(
+             sound::options::main_volume,
+-            "Main Volume",
+-            "Controls the main volume of the game.",
++            "Master Volume",
++            "Output volume of the game on this computer. 0% is silent. The game's own audio is not changed.",
+             100.0
+         );
+ 
+diff --git a/recompui/src/elements/ui_binding_button.cpp b/recompui/src/elements/ui_binding_button.cpp
+index e9a60e9..7318c28 100644
+--- a/recompui/src/elements/ui_binding_button.cpp
++++ b/recompui/src/elements/ui_binding_button.cpp
+@@ -204,7 +204,7 @@ namespace recompui {
+                     const float loop_length_seconds = 1.5f;
+                     float t = static_cast<float>(millis) / (loop_length_seconds * 1000.0f);
+                     float sine_time = sinf(t * 2.0f * 3.14159f);
+-                    float scale = 1.0f + ((sine_time * 0.15f / 2.0f) - 0.15f);
++                    float scale = recompui::get_reduced_motion() ? 1.0f : 1.0f + ((sine_time * 0.15f / 2.0f) - 0.15f);
+                     recording_circle->set_scale_2D(scale, scale);
+                 }
+ 
+diff --git a/recompui/src/elements/ui_element.cpp b/recompui/src/elements/ui_element.cpp
+index 28699c7..9ffc014 100644
+--- a/recompui/src/elements/ui_element.cpp
++++ b/recompui/src/elements/ui_element.cpp
+@@ -667,7 +667,7 @@ void Element::scroll_into_view(bool smooth) {
+ 
+     Rml::ScrollIntoViewOptions options;
+     options.vertical = Rml::ScrollAlignment::Nearest;
+-    if (smooth) {
++    if (smooth && !get_reduced_motion()) {
+         options.behavior = Rml::ScrollBehavior::Smooth;
+     }
+ 
+diff --git a/recompui/src/elements/ui_frontend_theme.h b/recompui/src/elements/ui_frontend_theme.h
+index 48a0717..452fdac 100644
+--- a/recompui/src/elements/ui_frontend_theme.h
++++ b/recompui/src/elements/ui_frontend_theme.h
+@@ -25,6 +25,24 @@ struct TabTheme {
+     std::optional<Color> focus_text_color;
+ };
+ 
++// Options in settings lists. When set, focus is a steady themed style instead of
++// the pulsing text; normal must define every property checked/focus change.
++struct RadioTheme {
++    Style normal;
++    Style checked;
++    Style focus;
++};
++
++// Number sliders. When set, the track and thumb use these styles and focus is a
++// steady themed thumb instead of the pulse; thumb must define every property
++// thumb_focus changes.
++struct SliderTheme {
++    Style bar;
++    Style thumb;
++    Style thumb_focus;
++    Style thumb_disabled;
++};
++
+ enum class TogglePreset {
+     Default,
+     Filled,
+@@ -73,6 +91,8 @@ struct FrontendTheme {
+         Style details;
+         TogglePreset enable_toggle = TogglePreset::Default;
+     } mods;
++    std::optional<RadioTheme> radio;
++    std::optional<SliderTheme> slider;
+ };
+ 
+ FrontendTheme make_default_frontend_theme();
+diff --git a/recompui/src/elements/ui_radio.cpp b/recompui/src/elements/ui_radio.cpp
+index 7a2b46b..839b772 100644
+--- a/recompui/src/elements/ui_radio.cpp
++++ b/recompui/src/elements/ui_radio.cpp
+@@ -1,6 +1,7 @@
+ #include "overloaded.h"
+ #include "ui_radio.h"
+ #include "ui_utils.h"
++#include "ui_frontend_theme.h"
+ 
+ namespace recompui {
+ 
+@@ -29,6 +30,14 @@ namespace recompui {
+         disabled_style.set_opacity(0.5f);
+         disabled_style.set_cursor(Cursor::None);
+ 
++        const auto &radio_theme = theme::get_frontend_theme().radio;
++        if (radio_theme) {
++            Style::apply_style(radio_theme->normal);
++            checked_style.apply_style(radio_theme->checked);
++            pulsing_style.apply_style(radio_theme->focus);
++            steady_focus = true;
++        }
++
+         add_style(&hover_style, { hover_state });
+         add_style(&checked_style, { checked_state });
+         add_style(&pulsing_style, { focus_state });
+@@ -82,7 +91,7 @@ namespace recompui {
+             }
+             break;
+         case EventType::Update:
+-            if (is_style_enabled(focus_state)) {
++            if (is_style_enabled(focus_state) && !steady_focus) {
+                 pulsing_style.set_color(recompui::get_pulse_color(750));
+                 apply_styles();
+                 queue_update();
+diff --git a/recompui/src/elements/ui_radio.h b/recompui/src/elements/ui_radio.h
+index 4a4033b..8f82213 100644
+--- a/recompui/src/elements/ui_radio.h
++++ b/recompui/src/elements/ui_radio.h
+@@ -13,6 +13,7 @@ namespace recompui {
+         std::function<void(uint32_t)> pressed_callback = nullptr;
+         std::function<void(bool)> focus_callback = nullptr;
+         uint32_t index = 0;
++        bool steady_focus = false;
+     protected:
+         virtual void process_event(const Event &e) override;
+         std::string_view get_type_name() override { return "LabelRadioOption"; }
+diff --git a/recompui/src/elements/ui_slider.cpp b/recompui/src/elements/ui_slider.cpp
+index 7a50da4..7a107e4 100644
+--- a/recompui/src/elements/ui_slider.cpp
++++ b/recompui/src/elements/ui_slider.cpp
+@@ -1,6 +1,7 @@
+ #include "overloaded.h"
+ #include "ui_slider.h"
+ #include "ui_utils.h"
++#include "ui_frontend_theme.h"
+ 
+ #include <cmath>
+ #include <charconv>
+@@ -72,12 +73,30 @@ namespace recompui {
+         }, val);
+     }
+ 
++    void Slider::apply_thumb_style() {
++        // Merged into the thumb's own style so later apply_styles() keep it.
++        const auto &slider_theme = theme::get_frontend_theme().slider;
++        if (!is_enabled()) {
++            circle_element->Style::apply_style(slider_theme->thumb_disabled);
++        }
++        else if (circle_element->is_style_enabled(focus_state)) {
++            circle_element->Style::apply_style(slider_theme->thumb_focus);
++        }
++        else {
++            circle_element->Style::apply_style(slider_theme->thumb);
++        }
++        circle_element->apply_styles();
++    }
++
+     void Slider::process_event(const Event& e) {
+         switch (e.type) {
+         case EventType::Focus:
+             {
+                 bool active = std::get<EventFocus>(e.variant).active;
+                 circle_element->set_style_enabled(focus_state, active);
++                if (themed) {
++                    apply_thumb_style();
++                }
+                 if (active) {
+                     queue_update();
+                 }
+@@ -87,7 +106,10 @@ namespace recompui {
+             }
+             break;
+         case EventType::Update:
+-            if (is_enabled()) {
++            if (themed) {
++                apply_thumb_style();
++            }
++            else if (is_enabled()) {
+                 if (circle_element->is_style_enabled(focus_state)) {
+                     circle_element->set_background_color(recompui::get_pulse_color(750));
+                     queue_update();
+@@ -126,6 +148,9 @@ namespace recompui {
+                     set_focusable(false);
+                     circle_element->set_background_color(theme::color::BW25);
+                 }
++                if (themed) {
++                    apply_thumb_style();
++                }
+             }
+             break;
+         default:
+@@ -181,6 +206,14 @@ namespace recompui {
+             circle_element->set_cursor(Cursor::Pointer);
+         }
+ 
++        const auto &slider_theme = theme::get_frontend_theme().slider;
++        if (slider_theme) {
++            themed = true;
++            bar_element->Style::apply_style(slider_theme->bar);
++            bar_element->apply_styles();
++            apply_thumb_style();
++        }
++
+         set_value_internal(value, true, false);
+     }
+ 
+diff --git a/recompui/src/elements/ui_slider.h b/recompui/src/elements/ui_slider.h
+index 4d8c41e..7c920f5 100644
+--- a/recompui/src/elements/ui_slider.h
++++ b/recompui/src/elements/ui_slider.h
+@@ -25,6 +25,8 @@ namespace recompui {
+         int precision = 0;
+         std::vector<std::function<void(double)>> value_changed_callbacks;
+         std::function<void(bool)> focus_callback = nullptr;
++        bool themed = false;
++        void apply_thumb_style();
+ 
+         void set_value_internal(double v, bool setup, bool trigger_callbacks);
+         void bar_pressed(float x, float y);
+diff --git a/recompui/src/elements/ui_tab_set.cpp b/recompui/src/elements/ui_tab_set.cpp
+index 5e0b163..c1aa1ec 100644
+--- a/recompui/src/elements/ui_tab_set.cpp
++++ b/recompui/src/elements/ui_tab_set.cpp
+@@ -52,7 +52,9 @@ Tab::Tab(ResourceId rid, Element *parent, int tab_index, std::string_view text,
+ }
+ 
+ void Tab::apply_theme(const theme::TabTheme &tab_theme) {
+-    apply_style(tab_theme.normal);
++    // Merged into the base style so state styles (hover, focus) that set a
++    // property normal defines revert to it instead of sticking.
++    Style::apply_style(tab_theme.normal);
+     hover_style.apply_style(tab_theme.hover);
+     checked_style.apply_style(tab_theme.selected);
+     pulsing_style.apply_style(tab_theme.pulsing);
+diff --git a/recompui/src/util/ui_utils.cpp b/recompui/src/util/ui_utils.cpp
+index ba41f6b..12be3b1 100644
+--- a/recompui/src/util/ui_utils.cpp
++++ b/recompui/src/util/ui_utils.cpp
+@@ -1,6 +1,9 @@
+ #include "ultramodern/ultramodern.hpp"
+ 
+ #include "ui_utils.h"
++#include "recompui/recompui.h"
++
++#include <atomic>
+ #include "elements/ui_theme.h"
+ 
+ recompui::Color recompui::lerp_color(const recompui::Color& a, const recompui::Color& b, float factor) {
+@@ -12,7 +15,20 @@ recompui::Color recompui::lerp_color(const recompui::Color& a, const recompui::C
+     };
+ }
+ 
++static std::atomic_bool reduced_motion{false};
++
++void recompui::set_reduced_motion(bool enabled) {
++    reduced_motion.store(enabled);
++}
++
++bool recompui::get_reduced_motion() {
++    return reduced_motion.load();
++}
++
+ recompui::Color recompui::get_pulse_color(uint32_t pulse_milliseconds) {
++    if (get_reduced_motion()) {
++        return recompui::theme::get_theme_color(theme::color::Secondary);
++    }
+     uint64_t millis = std::chrono::duration_cast<std::chrono::milliseconds>(ultramodern::time_since_start()).count();
+     uint32_t anim_offset = millis % pulse_milliseconds;
+     
+diff --git a/recompinput/src/input_events.cpp b/recompinput/src/input_events.cpp
+index 8aeefa1..80f8b5b 100644
+--- a/recompinput/src/input_events.cpp
++++ b/recompinput/src/input_events.cpp
+@@ -12,7 +12,12 @@ static struct {
+ namespace recompinput {
+ 
+ void queue_if_enabled(SDL_Event* event) {
+-    if (!recompinput::all_input_disabled() && !binding::should_skip_events()) {
++    // During a keyboard binding, another controller may still send navigation.
++    // Consume its press/axis events, but preserve release and window events so
++    // the frontend does not retain a pressed key when capture begins.
++    const bool captured_controller_navigation = binding::is_binding() &&
++        (event->type == SDL_CONTROLLERBUTTONDOWN || event->type == SDL_CONTROLLERAXISMOTION);
++    if (!recompinput::all_input_disabled() && !binding::should_skip_events() && !captured_controller_navigation) {
+         recompui::queue_event(*event);
+     }
+ }
