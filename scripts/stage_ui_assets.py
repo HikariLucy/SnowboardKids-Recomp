@@ -18,7 +18,7 @@ def reviewed_assets(root=ROOT):
     owned = root / 'assets/sbk-ui'
     theme = root / '.deps-renderer/recomp-theme/assets'
     paths = {f'icons/{name}.svg': owned / 'icons' / f'{name}.svg' for name in ICONS}
-    paths.update({name: owned / name for name in ('recomp.rcss', 'slope.svg', 'README.md')})
+    paths.update({name: owned / name for name in ('recomp.rcss', 'slope.svg', 'app-icon.png', 'README.md')})
     paths.update({name: theme / name for name in FONTS})
     paths.update({f'licenses/{name}-OFL.txt': root / 'licenses' / f'{name}-OFL.txt'
                   for name in ('LatoLatin', 'Fredoka', 'NotoEmoji')})

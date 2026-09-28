@@ -51,6 +51,8 @@ class UIAssetsTest(unittest.TestCase):
                 self.assertEqual((assets / 'icons' / icon.name).read_bytes(), icon.read_bytes())
             self.assertEqual((assets / 'recomp.rcss').read_bytes(),
                              (ROOT / 'assets/sbk-ui/recomp.rcss').read_bytes())
+            self.assertEqual((assets / 'app-icon.png').read_bytes(),
+                             (ROOT / 'assets/sbk-ui/app-icon.png').read_bytes())
 
     def test_package_rejects_stale_and_unknown_icons(self):
         with tempfile.TemporaryDirectory() as tmp:

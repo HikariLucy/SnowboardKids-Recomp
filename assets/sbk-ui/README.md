@@ -16,3 +16,18 @@ with their license texts included by the staging allowlist.
 Only scripts/stage_ui_assets.py may populate a build assets directory. It
 removes stale output and copies reviewed sources; packaging rejects extra,
 missing, symlinked or byte-modified files. No upstream drawings are shipped.
+
+## Application icon
+
+`app-icon.png` was created specifically for SnowboardKids-Recomp on
+2026-09-27 and selected by the project owner as the application's original
+launcher icon.
+
+It is a project-specific asset and is not extracted from the Snowboard Kids
+ROM, game artwork, commercial packaging, or an upstream recompilation project.
+
+Reviewed SHA-256:
+
+```text
+425c0f67240963694528a862891de565b4eefd1cd9333c76c3a544c924e79e67
+```
