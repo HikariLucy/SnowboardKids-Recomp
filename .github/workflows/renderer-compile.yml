@@ -4,7 +4,7 @@ name: Renderer stack compile (ROM-free)
 # no ROM-derived code, no packaging: SBK_RENDERER_COMPILE_CI is CI-only.
 on:
   push:
-    branches: [feat/vsync-presentation]
+    branches: [main, release/v0.9.0-beta, feat/vsync-presentation]
   workflow_dispatch:
 jobs:
   windows:
