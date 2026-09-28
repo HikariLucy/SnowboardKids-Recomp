@@ -1,4 +1,4 @@
-name: Release artifact readiness
+name: Release policy and packaging readiness
 on:
   workflow_dispatch:
 jobs:
@@ -6,5 +6,22 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Check release inputs and license gates
-        run: python3 scripts/check_release_readiness.py
+      - name: Install bootstrap tools
+        run: sudo apt-get update && sudo apt-get install -y git python3
+      - name: Bootstrap pinned runtime headers and reviewed theme fonts
+        run: python3 scripts/bootstrap.py --only runtime --only theme
+      - name: Verify release policy files
+        run: |
+          test -f LICENSE
+          test -f SOURCE-COMPLIANCE.md
+          test -f docs/BETA-DISTRIBUTION-POLICY.md
+          grep -F "RecompFrontend/issues/44" THIRD_PARTY_NOTICES.md
+      - name: Run release packaging and audit tests
+        run: python3 -m unittest discover -s tests/release -p "test_*.py"
+      - name: Diff check
+        run: git diff --check
+      - name: Explain final artifact gate
+        run: |
+          echo "Hosted CI intentionally never receives a commercial ROM."
+          echo "The final Linux archive is produced locally with scripts/package-beta-linux.sh"
+          echo "and must pass check_release_readiness.py --public-beta before upload."
