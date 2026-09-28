@@ -19,7 +19,8 @@ def compile_sources_to_shared_library(
     out_library: Path,
     workspace_dir: Path,
     jobs: int = 4,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    source_root: Optional[Path] = None
 ) -> float:
     """
     Compiles all sources into object files in parallel, then links them into out_library.
@@ -44,6 +45,23 @@ def compile_sources_to_shared_library(
         obj_path = workspace_dir / obj_name
 
         cmd = toolchain.get_compile_command(src, obj_path, include_dirs)
+
+        # Keep developer home/temp paths out of the distributable module. The
+        # generated corpus and RSP sources are compiled from absolute paths,
+        # and __FILE__/compiler diagnostics can otherwise become embedded in
+        # the shared object. Apply deterministic prefix maps without changing
+        # source lookup itself.
+        prefix_maps = []
+        if source_root is not None:
+            prefix_maps.append((source_root.resolve(), Path(".")))
+        prefix_maps.append((workspace_dir.parent.resolve(), Path(".module-build")))
+        if toolchain.is_msvc_like():
+            for old, new in prefix_maps:
+                cmd.insert(1, f"/pathmap:{old}={new}")
+        else:
+            for old, new in prefix_maps:
+                cmd.insert(1, f"-ffile-prefix-map={old}={new}")
+
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
             raise CompileError(
