@@ -280,22 +280,28 @@ std::vector<std::filesystem::path> GameModule::candidate_paths(
     const std::string mod_name = "SnowboardKidsGame.so";
 #endif
 
-    // User data directory candidates (FASE 5)
+    // Prefer user-installed modules so local rebuilds/updates override the
+    // release-bundled module without modifying the installation directory.
     if (!user_data_dir.empty()) {
         candidates.push_back(user_data_dir / "modules" / "snowboardkids-us" / mod_name);
         candidates.push_back(user_data_dir / "modules" / mod_name);
-    } else {
+    }
+
+    // Public release archives may bundle a reviewed precompiled game module.
+    // Always search the application directory after user data so a fresh
+    // install can run immediately after the user selects and validates a ROM.
+    if (!app_dir.empty()) {
+        candidates.push_back(app_dir / "modules" / "snowboardkids-us" / mod_name);
+        candidates.push_back(app_dir / "modules" / mod_name);
+        candidates.push_back(app_dir / mod_name);
+    }
+
+    // Development fallbacks when no explicit user-data path is available.
+    if (user_data_dir.empty()) {
         candidates.push_back(std::filesystem::current_path() / "modules" / "snowboardkids-us" / mod_name);
         candidates.push_back(std::filesystem::current_path() / "modules" / mod_name);
         candidates.push_back(std::filesystem::current_path() / mod_name);
         candidates.push_back(std::filesystem::current_path() / "build" / mod_name);
-    }
-
-    // Only search application directory if no user data directory was provided
-    if (user_data_dir.empty() && !app_dir.empty()) {
-        candidates.push_back(app_dir / "modules" / "snowboardkids-us" / mod_name);
-        candidates.push_back(app_dir / "modules" / mod_name);
-        candidates.push_back(app_dir / mod_name);
     }
 
     return candidates;

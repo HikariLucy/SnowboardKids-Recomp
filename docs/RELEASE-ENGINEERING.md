@@ -1,17 +1,36 @@
-# Release engineering (P0 draft, 2026-09-25)
+# Release engineering — v0.9.0-beta
 
-Base: `f89785ca2e0f21d0bcf7e5111b28ba7a8540bc78` on
-`feat/controller-pak-persistence`. This branch is infrastructure work, not a
-public release or a claim of full game compatibility.
+Updated: 2026-09-28
 
-## Inputs and reproducibility
+This document describes the first public playable beta of Snowboard Kids
+Recompiled. The validated release platform is Linux x86-64.
 
-`scripts/dependency_lock.py` is the sole source of upstream URLs, exact commits
-and canonical patch order. `scripts/bootstrap.sh` clones missing trees, rejects
-wrong commits or origins, updates submodules and applies the canonical patches.
-`scripts/dependency_patches.py` recognizes complete patch prefixes and refuses
-partial/local changes. It is intended to be rerunnable. Existing legacy
-bootstrap wrappers call this entrypoint.
+## Release model
+
+The public archive uses the split runtime architecture:
+
+```text
+SnowboardKidsEngine
+    + reviewed frontend/assets
+    + bundled SnowboardKidsGame.so
+    + license/source notices
+
+user supplies supported Snowboard Kids (USA) ROM
+    -> ROM validation
+    -> gameplay
+```
+
+The archive contains no ROM and no extracted game assets. The bundled game
+module exists so normal users do not need Python or a C++ compiler.
+
+A user-installed module in
+`~/.local/share/SnowboardKids/modules/snowboardkids-us/` takes precedence over
+the bundled module.
+
+## Exact dependency pins
+
+`scripts/dependency_lock.py` is the source of truth for upstream revisions and
+canonical patch order.
 
 | Dependency | Pinned commit |
 | --- | --- |
@@ -21,110 +40,156 @@ bootstrap wrappers call this entrypoint.
 | RT64 | `6a4166b2cfa952d931a08481d1037da995f28b54` |
 | Theme | `0cb9a83a263607fbc8ab6176a758a00726e237cc` |
 
-Linux build prerequisites at this baseline: Git, CMake >= 3.20, Ninja,
-Clang/Clang++, Python 3, pkg-config, SDL2, FreeType, GTK3 development
-packages, a Vulkan-capable system/driver and the pinned dependencies' DXC
-binary. A local validation environment used CMake 3.28.3, Clang 18.1.3,
-Ninja 1.11.1, Python 3.12/3.13, SDL2 2.30.0, FreeType 26.1.20 as reported
-by pkg-config, and GTK3 3.24.41. Node is not required by the build.
+## License/distribution policy
 
-**Clean source checkout limit:** `RecompiledFuncs`, the continuation corpus,
-`rsp/aspMain.cpp` and the matching decomp ELF are not tracked. The CPU corpus
-needs the matching locally built ELF; RSP generation needs the user's verified
-USA ROM. `scripts/build-release.sh` accepts `SBK_ELF` and `SBK_ROM` as explicit
-external inputs and runs a Release configure/build. It never downloads a ROM.
-A hosted public CI runner cannot reproduce the game binary from this source
-checkout without those inputs. Do not put ROMs in GitHub secrets or artifacts.
-The redistribution status of generated game-derived code is also unresolved.
-Until that is resolved, there is no clean-checkout hosted binary artifact.
+Project-authored source is GPL-3.0. The engine links N64ModernRuntime
+(GPL-3.0); the public release points to the exact source tag and preserves the
+project build scripts, dependency pins and runtime patch series.
 
-For a local legal build, supply the two files explicitly:
+RecompFrontend does not currently have a top-level license grant in the pinned
+checkout. Upstream clarification remains pending at:
 
-```sh
-export SBK_ROM=/absolute/path/to/your/snowboardkids-usa.z64
-export SBK_ELF=/absolute/path/to/your/matching/snowboardkids.elf
-bash scripts/build-release.sh
+https://github.com/N64Recomp/RecompFrontend/issues/44
+
+The beta proceeds with that uncertainty explicitly disclosed in:
+
+- `THIRD_PARTY_NOTICES.md`
+- `SOURCE-COMPLIANCE.md`
+- `docs/BETA-DISTRIBUTION-POLICY.md`
+- the GitHub Release notes
+
+This is an explicit release-policy decision, not an inferred RecompFrontend
+license.
+
+## User-data path
+
+- Linux: `$XDG_DATA_HOME/SnowboardKids` or `~/.local/share/SnowboardKids`
+- Windows: `%APPDATA%\SnowboardKids`
+- Override: `SBK_USER_DATA_DIR`
+
+The release archive must not contain user configuration, saves, Controller Pak
+files, savestates or `portable.txt`.
+
+## Building the Linux release candidate
+
+The local validated build tree already contains the generated continuation
+corpus required to compile the engine/module. A public hosted runner never
+receives a ROM.
+
+Configure/build the current release branch as usual, then make sure the
+ROM-free engine and reviewed local module exist:
+
+```bash
+cmake --build build-renderer-stack --target SnowboardKidsEngine -j "$(nproc)"
+
+ls -lh build-renderer-stack/SnowboardKidsEngine
+ls -lh ~/.local/share/SnowboardKids/modules/snowboardkids-us/SnowboardKidsGame.so
+
+./build-renderer-stack/SnowboardKidsEngine --version
+./build-renderer-stack/SnowboardKidsEngine \
+  --validate-module ~/.local/share/SnowboardKids/modules/snowboardkids-us/SnowboardKidsGame.so
 ```
 
-The ROM must match USA SHA-1 `1583bacc9046a360df8ea4d536942155247e154c`.
-The runtime's `select_rom()` compares the supported XXH3-64 identity
-`0xF384619787B78D4B`. Header game code is `NSKE`. Filename alone is never
-an identity check. No ROM location or download source is provided.
+Create the deterministic release package:
 
-## Runtime and archive layout
+```bash
+bash scripts/package-beta-linux.sh
+```
 
-The planned archive root is `SnowboardKidsRecompiled/` with executable,
-`assets/`, `RUNNING.md`, `THIRD_PARTY_NOTICES.md` and available license texts.
-The app resolves read-only assets from the executable's directory. On Linux,
-frontend user data defaults to `~/.config/snowboardkids-recompiled`; Windows
-uses Local AppData via the frontend. `SBK_USER_DATA_DIR` overrides it. An
-existing development build directory with `CMakeCache.txt` and `runtime-data/`
-continues to use that local folder. Controls, general/graphics/sound settings,
-`.sbks` savestates and `.mpk` Controller Paks share the registered data path.
-Do not place `portable.txt` in an artifact: RecompFrontend interprets it as a
-request to write beside the executable. Migration of old development data is
-manual and non-destructive.
+Expected outputs:
 
-No-argument launch opens the existing RecompFrontend file dialog. Explicit
-ROM paths remain supported. `--help` and `--version` return before SDL/audio,
-Vulkan, ROM validation or user-data creation. Invalid arguments return 2;
-unsupported ROMs return 1; dialog cancellation returns 0.
+```text
+dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip
+dist/SHA256SUMS.txt
+```
 
-`scripts/package_release.py` accepts only explicit binary, asset and shared
-library inputs, emits a sorted fixed-timestamp ZIP and SHA256SUMS.txt, then
-runs `scripts/audit_release_artifact.py`. The scanner rejects ROM extensions
-and headers, saves/Paks, JSON user config, logs, build files, symlinks,
-absolute personal paths and suspicious size. A `--draft` flag exists solely
-for local synthetic-package tests while `THIRD_PARTY_NOTICES.md` contains
-`RELEASE_BLOCKER`; it must never be used for a public upload.
+The script refuses dirty source trees, stale binaries, missing modules and
+invalid module ABI. It stages only reviewed assets, creates the archive, runs
+the artifact audit and executes the disclosed public-beta readiness policy.
 
-## CI and test classes
+## Fresh-user release test
 
-`.github/workflows/ci.yml` configures ROM-free CMake targets on Ubuntu and
-Windows. Both bootstrap the pinned runtime headers and theme fonts and run
-the full ROM-free set, including Controller Pak (`WINDOWS-PFS-CI.md`). No GPU, display, audio device or ROM is
-needed. `.github/workflows/artifacts.yml` is a manual readiness gate that
-fails explicitly until licensing and clean-checkout generated-input blockers
-are resolved. It does not upload a misleading binary or create a release.
-There is no cache: correctness takes precedence over speed.
+Do not test the archive from the repository directory.
 
-- **ROM-free:** audio progress, isolated Controller Pak, P2, savestate codec,
-  release scanner/packager, and some controls/renderer fixtures after their
-  dependencies are built.
-- **Local ROM required:** generated corpus, RSP, full executable and automated
-  navigation tests.
-- **Human/live:** gameplay finish, original save, physical controller/rumble,
-  multiplayer and visual validation. These are outside this release task.
+```bash
+rm -rf /tmp/sbk-v090-fresh
+mkdir -p /tmp/sbk-v090-fresh
+cd /tmp/sbk-v090-fresh
+unzip ~/proyectos/Recomp/SnowboardKids-Recomp/dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip
+cd SnowboardKidsRecompiled
+./SnowboardKidsEngine
+```
 
-Linux dynamic dependencies observed with `ldd` on the baseline local binary
-include SDL2, libatomic, FreeType, GTK3, libc/libstdc++, audio backends and
-X11/Wayland support. Do not bundle glibc. Recheck `ldd`, `RPATH` and package
-launch from an arbitrary directory on the actual release candidate; that gate
-is not yet complete. `RUNNING.md` covers missing runtime libraries, Vulkan,
-audio, invalid ROM, unwritable data path and corrupt Pak.
+Validate at minimum:
 
-Windows has a ROM-free CI compile path but no game binary build or artifact
-claim. The full CMake target and generation scripts contain Clang/GNU flags,
-Unix shell tools and Linux package assumptions. A Windows runner compile and
-`--help`/`--version` smoke are required before declaring support. macOS is
-**NEEDS WORK**: the pinned stack has a DXC/MoltenVK branch, but no build or
-runtime evidence for this project.
+1. the application opens from the extracted directory;
+2. it finds the bundled game module without compiling anything;
+3. it asks for the user's ROM;
+4. the supported ROM validates;
+5. title/menu gameplay starts;
+6. controller/keyboard input works;
+7. an existing save can be loaded if desired;
+8. F5/F8 savestates work;
+9. closing and reopening works from the extracted build.
 
-## Source, assets and licensing
+No development directory may be required for this test.
 
-Tracked project files are project source/config/tests. The ignored generated
-CPU corpus and RSP source are game-derived; user ROM and ELF are external.
-Pinned dependencies and theme are third-party. The source repository has no
-project LICENSE at this baseline, and several upstream/theme/font obligations
-are not documented; see `THIRD_PARTY_NOTICES.md`. These are distribution
-blockers, not a legal conclusion. No public artifact should be uploaded until
-they are resolved. No game screenshots, ROM textures or extracted assets are
-included by the package script.
+## Artifact layout
 
-## Version policy
+```text
+SnowboardKidsRecompiled/
+├── SnowboardKidsEngine
+├── modules/
+│   └── snowboardkids-us/
+│       └── SnowboardKidsGame.so
+├── assets/
+├── licenses/
+├── LICENSE
+├── THIRD_PARTY_NOTICES.md
+├── SOURCE-COMPLIANCE.md
+├── BETA-DISTRIBUTION-POLICY.md
+├── BUILD-INFO.txt
+└── RUNNING.md
+```
 
-Development version starts at `0.1.0` in CMake. `--version` reports that value
-and the 12-character source Git commit. No timestamp is embedded. A future
-approved release could use `v0.x.y` tags and archives named
-`SnowboardKidsRecompiled-<version>-<platform>.zip`; no tag or GitHub Release
-is created in this phase.
+The audit rejects ROM headers/extensions, user data, saves, Controller Pak
+images, savestates, logs, build junk, symlinks and personal absolute paths.
+The game module is permitted only at the canonical module path.
+
+## CI
+
+`.github/workflows/ci.yml` is ROM-free and runs on Linux and Windows.
+`.github/workflows/renderer-compile.yml` verifies the Windows clang-cl
+RT64/RecompFrontend/runtime compile path.
+
+Neither workflow stores a commercial ROM.
+
+The release artifact itself is assembled from the locally validated Linux
+engine/module because the game-module generation inputs are intentionally not
+placed in GitHub Actions.
+
+## Tag and GitHub Release
+
+Only after the fresh-user archive test passes:
+
+```bash
+git switch main
+git pull --ff-only origin main
+git tag -a v0.9.0-beta -m "Snowboard Kids Recompiled v0.9.0-beta"
+git push origin v0.9.0-beta
+
+gh release create v0.9.0-beta \
+  dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip \
+  dist/SHA256SUMS.txt \
+  --prerelease \
+  --title "Snowboard Kids Recompiled v0.9.0-beta" \
+  --notes-file docs/releases/v0.9.0-beta.md
+```
+
+The release notes must retain the RecompFrontend licensing disclosure.
+
+## Windows status
+
+Windows ROM-free CI and renderer/D3D12 compile validation are available, but a
+Windows gameplay binary has not yet received live validation. Do not label
+Windows as fully supported until that test is performed.

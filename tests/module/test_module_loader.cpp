@@ -101,7 +101,19 @@ int main(int argc, char** argv) {
             }
         }
         CHECK(found_userdata, "Candidate paths must search user data modules directory");
-        std::cout << "[PASS] User data candidate search path verified" << std::endl;
+
+        const std::filesystem::path app_modules_dir = app_dir / "modules";
+        bool found_app = false;
+        for (const auto& c : candidates) {
+            if (c.parent_path() == app_modules_dir ||
+                c.parent_path() == app_modules_dir / "snowboardkids-us" ||
+                c.parent_path() == app_dir) {
+                found_app = true;
+                break;
+            }
+        }
+        CHECK(found_app, "Candidate paths must fall back to bundled application modules");
+        std::cout << "[PASS] User data override and bundled application module paths verified" << std::endl;
     }
 
     // 5. Initialize module

@@ -26,6 +26,10 @@ def main():
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--library', type=Path, action='append', default=[])
+    parser.add_argument('--game-module', type=Path,
+                        help='Reviewed precompiled SnowboardKidsGame module to bundle under modules/snowboardkids-us')
+    parser.add_argument('--public-beta', action='store_true',
+                        help='Build the disclosed public-beta package while RecompFrontend license clarification is pending')
     parser.add_argument('--version', default='0.1.0', help='Project version')
     parser.add_argument('--commit', default=None, help='Git commit hash')
     parser.add_argument('--platform', default=sys.platform if not sys.platform.startswith('linux') else 'linux')
@@ -36,6 +40,19 @@ def main():
     notices = (ROOT / 'THIRD_PARTY_NOTICES.md').read_bytes()
     if (b'BLOCKER' in notices or b'RELEASE_BLOCKER' in notices) and not args.draft:
         parser.error('third-party license/source review has blocker entries')
+    if args.public_beta:
+        required_policy = [
+            ROOT / 'LICENSE',
+            ROOT / 'SOURCE-COMPLIANCE.md',
+            ROOT / 'docs' / 'BETA-DISTRIBUTION-POLICY.md',
+        ]
+        missing_policy = [str(path.relative_to(ROOT)) for path in required_policy if not path.is_file()]
+        if missing_policy:
+            parser.error('public beta policy files missing: ' + ', '.join(missing_policy))
+        if b'RecompFrontend/issues/44' not in notices:
+            parser.error('public beta notices must disclose pending RecompFrontend issue #44')
+        if args.game_module is None:
+            parser.error('--public-beta requires --game-module for a ready-to-use package')
     if not args.binary.is_file() or not args.assets.is_dir():
         parser.error('built executable and theme asset directory are required')
     from generate_version_header import get_git_commit
@@ -63,6 +80,10 @@ def main():
     files = [('BUILD-INFO.txt', manifest, False),
              ('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
              ('THIRD_PARTY_NOTICES.md', notices, False),
+             ('LICENSE', (ROOT / 'LICENSE').read_bytes(), False),
+             ('SOURCE-COMPLIANCE.md', (ROOT / 'SOURCE-COMPLIANCE.md').read_bytes(), False),
+             ('BETA-DISTRIBUTION-POLICY.md',
+              (ROOT / 'docs' / 'BETA-DISTRIBUTION-POLICY.md').read_bytes(), False),
              (args.binary.name, binary_bytes, True)]
 
     # Bundle offline module builder tooling for user-ROM local compilation
@@ -79,6 +100,15 @@ def main():
         parser.error(str(error))
     for name, data in sorted(reviewed.items()):
         files.append(('assets/' + name, data, False))
+    if args.game_module is not None:
+        module = args.game_module
+        if not module.is_file() or module.is_symlink():
+            parser.error(f'invalid game module: {module}')
+        allowed_names = {'SnowboardKidsGame.so', 'SnowboardKidsGame.dll', 'SnowboardKidsGame.dylib'}
+        if module.name not in allowed_names:
+            parser.error(f'game module must use a canonical filename, got: {module.name}')
+        files.append((f'modules/snowboardkids-us/{module.name}', module.read_bytes(), False))
+
     for library in args.library:
         if not library.is_file() or library.is_symlink():
             parser.error(f'invalid shared library: {library}')

@@ -140,7 +140,8 @@ class ModuleBuilderService:
                 out_library=temp_out_library,
                 workspace_dir=tmp_workspace / "obj",
                 jobs=self.config.jobs,
-                progress_callback=comp_progress
+                progress_callback=comp_progress,
+                source_root=self.root_dir
             )
 
             # 6. Validate ABI

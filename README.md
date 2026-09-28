@@ -6,7 +6,7 @@ Native PC recompilation/port of **Snowboard Kids (Nintendo 64, USA)** built on t
 
 ## Status
 
-**Core PC port: complete and playable — public beta candidate.**
+**Core PC port: complete and playable — `v0.9.0-beta` release candidate.**
 
 The current build has been validated in real play sessions, not only automated tests:
 
@@ -23,27 +23,25 @@ The current build has been validated in real play sessions, not only automated t
 - Linux and Windows ROM-free CI: **GREEN**
 - Windows D3D12/VSync renderer stack: **COMPILE PASS**; live Windows validation is still pending
 
-The remaining roadmap work is primarily release/legal packaging and post-launch enhancements, not basic playability.
+The remaining roadmap work is primarily release packaging, Windows live validation and post-launch enhancements, not basic playability.
 
-**First public release target: `v0.9.0-beta`.**
+**First public release: `v0.9.0-beta` (Linux x86-64 first).**
 
 ## Quick start
 
 ### Recommended: release build
 
-Once `v0.9.0-beta` is published:
+For the public beta:
 
-1. Download the release archive for your platform from **GitHub Releases**.
-2. Extract it to any normal writable folder.
+1. Download the Linux x86-64 archive from **GitHub Releases**.
+2. Extract it to a normal writable folder.
 3. Launch **SnowboardKidsEngine**.
-   - Linux: double-click the executable after marking it executable if your desktop asks.
-   - Windows: double-click `SnowboardKidsEngine.exe` once the Windows release build is published.
-4. On first launch, the setup window asks you to choose your own supported Snowboard Kids (USA) ROM.
-5. The engine validates the ROM and builds the local game module on your computer.
-6. When generation finishes, the game starts automatically.
-7. Future launches reuse that local module; you do not need to rebuild it every time.
+4. Select your own supported Snowboard Kids (USA) ROM when prompted.
+5. The engine validates the ROM and starts the bundled reviewed game module.
+6. Future launches remember the selected ROM path.
 
-You do **not** need to pass the ROM on the command line for normal use.
+The public beta does **not** require a compiler, Python setup, ROM extraction or
+a separate build step. It still requires the user's original supported ROM.
 
 ### Supported ROM
 
@@ -67,33 +65,29 @@ A filename or matching game ID alone is **not** sufficient. Unsupported revision
 
 ## First-run architecture
 
-SnowboardKids-Recomp uses a split **Model D** architecture:
+SnowboardKids-Recomp keeps the host engine and recompiled game module separate:
 
 ```text
 SnowboardKidsEngine
         |
-        |  first launch
+        +--> bundled SnowboardKidsGame module
+        |
         v
 Choose your own ROM
         |
         v
-Validate + locally generate module
-        |
-        v
-SnowboardKidsGame.so / SnowboardKidsGame.dll
+Validate supported ROM
         |
         v
 Play
 ```
 
-The distributed engine contains:
+The `v0.9.0-beta` archive contains a reviewed precompiled game module so normal
+players do not need a compiler. The module contains recompiled game logic but
+the release contains **no ROM and no extracted commercial game assets**.
 
-- no ROM
-- no extracted commercial game assets
-- no pre-generated game module
-- no generated `RecompiledFuncs`
-
-The local module is generated only on the user's machine from the user's supported ROM.
+The original local module builder remains available for development and recovery
+workflows. See [RUNNING.md](RUNNING.md).
 
 ## Playing
 
@@ -224,13 +218,20 @@ Exact revisions are pinned in `scripts/dependency_lock.py`.
 
 ## License and redistribution status
 
-The source repository is being prepared for public release.
+Project-authored source is released under **GNU GPL version 3**; see [LICENSE](LICENSE).
 
-N64ModernRuntime is GPL-3.0 licensed, and binary distribution must satisfy its corresponding-source obligations. Most other dependencies are already inventoried in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+N64ModernRuntime is GPL-3.0 licensed. Corresponding-source/build directions for
+the engine are documented in [SOURCE-COMPLIANCE.md](SOURCE-COMPLIANCE.md).
 
-An explicit license clarification for RecompFrontend is still pending. Until that is resolved, this project should **not publish a public binary release that redistributes RecompFrontend**.
+The pinned RecompFrontend repository currently has **no top-level license grant**.
+Clarification is pending in
+[N64Recomp/RecompFrontend#44](https://github.com/N64Recomp/RecompFrontend/issues/44).
+The public beta proceeds with that uncertainty explicitly disclosed rather than
+claiming a license that upstream has not stated.
 
-This licensing work does not affect local development or gameplay testing.
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
+[docs/BETA-DISTRIBUTION-POLICY.md](docs/BETA-DISTRIBUTION-POLICY.md) before
+redistributing a binary build.
 
 ## Documentation
 
@@ -241,6 +242,8 @@ This licensing work does not affect local development or gameplay testing.
 - [Controller Pak persistence](docs/CONTROLLER-PAK-PERSISTENCE.md)
 - [Original save-data map](docs/SAVE-DATA-MAP.md)
 - [License audit](docs/LICENSE-AUDIT.md)
+- [Public beta distribution policy](docs/BETA-DISTRIBUTION-POLICY.md)
+- [Corresponding source](SOURCE-COMPLIANCE.md)
 
 ## Disclaimer
 
