@@ -19,9 +19,11 @@ class ReadinessTest(unittest.TestCase):
         self.assertIn("promptfont_license", pass_names)
         self.assertIn("bundled_font_licenses", pass_names)
 
-        # Explicit remaining blockers
-        self.assertIn("project_license", blocker_names)
-        self.assertIn("dependency_gpl_compliance", blocker_names)
+        # Project/GPL release metadata is now present.
+        self.assertIn("project_license", pass_names)
+        self.assertIn("dependency_gpl_compliance", pass_names)
+
+        # Explicit remaining blockers without the public-beta policy switch.
         self.assertIn("recompfrontend_license", blocker_names)
         self.assertIn("theme_asset_icons", blocker_names)
         self.assertIn("game_distribution_model", blocker_names)
@@ -33,7 +35,8 @@ class ReadinessTest(unittest.TestCase):
         self.assertIn("PASS dependency_provenance", res.stdout)
         self.assertIn("PASS bundled_font_licenses", res.stdout)
         self.assertIn("BLOCKER recompfrontend_license", res.stderr)
-        self.assertIn("BLOCKER project_license", res.stderr)
+        self.assertNotIn("BLOCKER project_license", res.stderr)
+        self.assertIn("PASS project_license", res.stdout)
 
 
 if __name__ == '__main__':
