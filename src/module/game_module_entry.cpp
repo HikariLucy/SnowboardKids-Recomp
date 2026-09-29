@@ -41,6 +41,9 @@ __attribute__((weak)) uint8_t dmem[0x1000];
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <windows.h>
 
 #include "engine_imports_win32.hpp"
