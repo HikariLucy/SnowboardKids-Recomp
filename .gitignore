@@ -73,3 +73,6 @@ build-ci/
 build-split/
 build-engine/
 build-rci/
+
+# ROM-derived module inputs bundle (scripts/export-module-inputs.py)
+sbk-module-inputs*.zip

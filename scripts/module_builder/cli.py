@@ -58,6 +58,12 @@ Exit Codes:
     parser.add_argument("--rom", dest="rom_opt", type=Path, help="Explicit path to ROM")
     parser.add_argument("--out", type=Path, default=None, help="Explicit output path for the compiled library (.so/.dll)")
     parser.add_argument("--out-dir", type=Path, default=None, help="Output directory to place module and MODULE-INFO.json")
+    parser.add_argument("--inputs", type=Path, default=None,
+                        help="Module inputs bundle (.zip or directory) from scripts/export-module-inputs.py; "
+                             "replaces the local corpus and RSPRecomp (Windows builds)")
+    parser.add_argument("--engine", type=Path, default=None,
+                        help="SnowboardKidsEngine executable used for --validate-module "
+                             "(default: $SBK_ENGINE, then build-engine/)")
     parser.add_argument("--jobs", "-j", type=int, default=4, help="Compiler worker threads (default: 4)")
     parser.add_argument("--cxx", type=str, default=None, help="Explicit C++ compiler executable")
     parser.add_argument("--non-interactive", action="store_true", help="Run without interactive prompts")
@@ -80,7 +86,9 @@ Exit Codes:
         cxx=args.cxx,
         jobs=max(1, args.jobs),
         keep_temp=args.keep_temp,
-        debug=args.keep_temp
+        debug=args.keep_temp,
+        inputs=args.inputs,
+        engine=args.engine,
     )
 
     def print_status(phase: str, current: int = None, total: int = None):
@@ -90,6 +98,8 @@ Exit Codes:
     print(" Snowboard Kids Local Game Module Builder")
     print("==================================================")
     print(f"ROM Image: {rom_path}")
+    if args.inputs:
+        print(f"Inputs:    {args.inputs}")
 
     builder = ModuleBuilderService(config)
     try:
@@ -108,6 +118,7 @@ Exit Codes:
     print(f"Build Time:    {result.build_time_seconds:.2f}s")
     print(f"Corpus Digest: {result.metadata.get('corpus_digest')}")
     print(f"Functions:     {result.metadata.get('function_count')}")
+    print(f"Validation:    {result.metadata.get('validation')}")
     print("==================================================")
     return BuilderExitCode.SUCCESS
 

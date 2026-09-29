@@ -1,6 +1,7 @@
 """Unit tests for the Snowboard Kids Game Module Builder package."""
 
 from contextlib import contextmanager
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -292,6 +293,129 @@ class WindowsModuleBuildTests(unittest.TestCase):
             imports = ROOT / "src" / "module" / "engine_imports_win32.cpp"
             self.assertNotIn(imports, linux)
             self.assertEqual(windows, linux + [imports])
+
+
+class ModuleInputsBundleTests(unittest.TestCase):
+    """Corpus + RSP bundle exported on Linux/WSL2 and consumed by a Windows build."""
+
+    ROM_SHA1 = EXPECTED_SHA1
+
+    def make_sources(self, root: Path):
+        corpus = root / "corpus"
+        corpus.mkdir()
+        for i in range(40):
+            (corpus / f"funcs_{i}.c").write_text(f"// unit {i}\n")
+        for name in ("lookup.cpp", "funcs.h", "recomp_overlays.inl"):
+            (corpus / name).write_text(f"// {name}\n")
+        (corpus / "notes.txt").write_text("not a source")  # never bundled
+        rsp = root / "aspMain.cpp"
+        rsp.write_bytes(b"// rsp\r\n")  # line endings must survive byte-exact
+        return corpus, rsp
+
+    def write(self, root: Path, name="inputs.zip"):
+        from module_builder.inputs import collect_bundle_files, write_bundle
+        corpus, rsp = self.make_sources(root)
+        bundle = root / name
+        write_bundle(bundle, collect_bundle_files(corpus, rsp), self.ROM_SHA1, "abc")
+        return bundle
+
+    def test_zip_round_trip_is_exact_and_deterministic(self):
+        from module_builder.inputs import load_bundle
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            bundle = self.write(root)
+            first = bundle.read_bytes()
+            bundle.unlink()
+            (root / "corpus").rename(root / "corpus-old")
+            (root / "aspMain.cpp").unlink()
+            self.assertEqual(self.write(root).read_bytes(), first)
+            inputs = load_bundle(bundle, self.ROM_SHA1.upper(), root / "work")
+            self.assertEqual(len(list(inputs.corpus_dir.glob("funcs_*.c"))), 40)
+            self.assertFalse((inputs.corpus_dir / "notes.txt").exists())
+            self.assertEqual(inputs.rsp_cpp.read_bytes(), b"// rsp\r\n")
+
+    def test_extracted_directory_is_accepted(self):
+        import zipfile
+        from module_builder.inputs import load_bundle
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with zipfile.ZipFile(self.write(root)) as archive:
+                archive.extractall(root / "extracted")
+            inputs = load_bundle(root / "extracted", self.ROM_SHA1, root / "work")
+            self.assertTrue((inputs.corpus_dir / "lookup.cpp").is_file())
+
+    def test_bundle_from_another_rom_is_refused(self):
+        from module_builder.inputs import load_bundle
+        with tempfile.TemporaryDirectory() as td:
+            bundle = self.write(Path(td))
+            with self.assertRaises(RomValidationError):
+                load_bundle(bundle, "0" * 40, Path(td) / "work")
+
+    def rewrite(self, bundle: Path, edit):
+        import zipfile
+        with zipfile.ZipFile(bundle) as archive:
+            members = {name: archive.read(name) for name in archive.namelist()}
+        manifest = json.loads(members["INPUTS.json"])
+        edit(members, manifest)
+        members["INPUTS.json"] = json.dumps(manifest).encode()
+        with zipfile.ZipFile(bundle, "w") as archive:
+            for name, data in members.items():
+                archive.writestr(name, data)
+
+    def test_modified_member_is_refused(self):
+        from module_builder.inputs import load_bundle
+        with tempfile.TemporaryDirectory() as td:
+            bundle = self.write(Path(td))
+            # CRLF conversion by a copy tool is the realistic corruption.
+            self.rewrite(bundle, lambda m, _: m.update({"corpus/funcs_3.c": b"// unit 3\r\n"}))
+            with self.assertRaisesRegex(GeneratorError, "checksum"):
+                load_bundle(bundle, self.ROM_SHA1, Path(td) / "work")
+
+    def test_unexpected_member_names_are_refused(self):
+        from module_builder.inputs import load_bundle
+        for name in ("../escape.c", "corpus/../../escape.c", "src/evil.cpp", "corpus/sub/x.c"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
+                bundle = self.write(Path(td))
+                def edit(members, manifest):
+                    members[name] = b"x"
+                    manifest["files"][name] = hashlib.sha256(b"x").hexdigest()
+                self.rewrite(bundle, edit)
+                with self.assertRaisesRegex(GeneratorError, "unexpected"):
+                    load_bundle(bundle, self.ROM_SHA1, Path(td) / "work")
+                self.assertFalse((Path(td) / "escape.c").exists())
+
+    def test_incomplete_corpus_is_refused(self):
+        from module_builder.inputs import collect_bundle_files
+        with tempfile.TemporaryDirectory() as td:
+            corpus, rsp = self.make_sources(Path(td))
+            (corpus / "funcs_39.c").unlink()
+            with self.assertRaises(GeneratorError):
+                collect_bundle_files(corpus, rsp)
+
+    def test_rom_derived_output_stays_out_of_tracked_paths(self):
+        from module_builder.inputs import ensure_not_tracked_location
+        if not (ROOT / ".git").exists():
+            self.skipTest("needs a git checkout")
+        with self.assertRaises(StoragePermissionError):
+            ensure_not_tracked_location(ROOT, ROOT / "docs" / "exported-inputs.zip")
+        ensure_not_tracked_location(ROOT, ROOT / "build-tools" / "module-inputs" / "x.zip")
+        with tempfile.TemporaryDirectory() as td:
+            ensure_not_tracked_location(ROOT, Path(td) / "x.zip")
+
+
+class WindowsValidationTests(unittest.TestCase):
+    def test_windows_module_requires_the_engine(self):
+        from unittest import mock
+        from module_builder import validator
+        with tempfile.TemporaryDirectory() as td:
+            module = Path(td) / "SnowboardKidsGame.dll"
+            module.write_bytes(b"MZ sbk_game_module_get_api")  # would pass a symbol scan
+            with mock.patch.object(validator.sys, "platform", "win32"), \
+                 mock.patch.object(validator, "find_engine_executable", return_value=None):
+                with self.assertRaisesRegex(ModuleValidationError, "required"):
+                    validator.validate_module_binary(module, ROOT)
+            with self.assertRaisesRegex(ModuleValidationError, "not found"):
+                validator.validate_module_binary(module, ROOT, engine=Path(td) / "missing.exe")
 
 
 if __name__ == "__main__":

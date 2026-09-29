@@ -75,7 +75,8 @@ def validate_with_engine(engine_exe: Path, module_path: Path) -> Dict[str, Any]:
         [str(engine_exe), "--validate-module", str(module_path.resolve())],
         capture_output=True,
         text=True,
-        timeout=10
+        # init() binds ~2000 functions; a first launch under antivirus scanning is slow.
+        timeout=120
     )
     if res.returncode != 0:
         err = res.stderr.strip() or res.stdout.strip()
@@ -93,6 +94,7 @@ def validate_with_engine(engine_exe: Path, module_path: Path) -> Dict[str, Any]:
         "hle_count": 56,
         "entrypoint_address": "0x80000400",
         "continuation_count": 1981,
+        "validation": "engine",
     }
     for line in res.stdout.splitlines():
         if "MODULE_VALID" in line:
@@ -108,7 +110,8 @@ def validate_with_engine(engine_exe: Path, module_path: Path) -> Dict[str, Any]:
     return meta
 
 
-def validate_module_binary(module_path: Path, root_dir: Optional[Path] = None) -> Dict[str, Any]:
+def validate_module_binary(module_path: Path, root_dir: Optional[Path] = None,
+                           engine: Optional[Path] = None) -> Dict[str, Any]:
     """
     Loads the compiled dynamic module and validates its ABI compliance and exported symbols.
     First tries host engine validation (resolving host HLE symbols).
@@ -121,12 +124,22 @@ def validate_module_binary(module_path: Path, root_dir: Optional[Path] = None) -
     # The engine verdict is authoritative: it loads the module the way the game
     # does (including Windows import binding) and must not be masked by the
     # weaker fallbacks below. Only an engine that cannot run falls through.
-    engine_exe = find_engine_executable(root_dir)
+    if engine is not None and not Path(engine).is_file():
+        raise ModuleValidationError(f"Engine executable not found: {engine}")
+    engine_exe = Path(engine).resolve() if engine is not None else find_engine_executable(root_dir)
+    # A Windows DLL imports its runtime from SnowboardKidsEngine.exe, so only
+    # the engine can load it; the fallbacks below would prove nothing there.
+    engine_required = sys.platform == "win32"
     if engine_exe:
         try:
             return validate_with_engine(engine_exe, module_path)
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        except (OSError, subprocess.TimeoutExpired) as e:
+            if engine_required:
+                raise ModuleValidationError(f"Could not run {engine_exe.name} --validate-module: {e}")
+    elif engine_required:
+        raise ModuleValidationError(
+            "SnowboardKidsEngine.exe is required to validate a Windows module. Build it into "
+            "build-engine\ (docs/WINDOWS.md), or pass --engine / set SBK_ENGINE.")
 
     # 2. Try ctypes load (works for synthetic modules or if no unresolved data relocations)
     try:
@@ -183,6 +196,7 @@ def validate_module_binary(module_path: Path, root_dir: Optional[Path] = None) -
             "hle_count": api.hle_count,
             "entrypoint_address": f"0x{api.entrypoint_address:08X}",
             "continuation_count": api.continuation_count,
+            "validation": "ctypes",
         }
     except OSError as e:
         # If ctypes fails due to unresolved host symbols (e.g. osViBlack_recomp from host engine),
@@ -227,4 +241,5 @@ def validate_module_binary(module_path: Path, root_dir: Optional[Path] = None) -
         "hle_count": 56,
         "entrypoint_address": "0x80000400",
         "continuation_count": 1981,
+        "validation": "symbol-scan",
     }

@@ -8,9 +8,12 @@ import zipfile
 
 BAD_SUFFIXES = {'.z64', '.n64', '.v64', '.rom', '.mpk', '.pak', '.sbks',
                 '.log', '.o', '.obj', '.a', '.lib', '.pdb', '.cmake', '.json',
-                '.exp', '.ilk', '.def', '.manifest'}
+                '.exp', '.ilk', '.def', '.manifest', '.zip', '.inl'}
 BAD_NAMES = {'cmakecache.txt', 'build.ninja', 'makefile', 'portable.txt',
-             '.git', 'runtime-data', '__pycache__'}
+             '.git', 'runtime-data', '__pycache__',
+             # ROM-derived module inputs (corpus/RSP), see scripts/module_builder/inputs.py
+             'corpus', 'aspmain.cpp', 'lookup.cpp', 'funcs.h'}
+ROM_DERIVED_SOURCE = re.compile(r'funcs_\d+\.c', re.IGNORECASE)
 GAME_MODULE_PATHS = {
     'SnowboardKidsRecompiled/modules/snowboardkids-us/SnowboardKidsGame.so',
     'SnowboardKidsRecompiled/modules/snowboardkids-us/SnowboardKidsGame.dll',
@@ -46,7 +49,8 @@ def audit(archive):
                 continue
             if (info.external_attr >> 16) & 0o170000 == 0o120000:
                 errors.append(f'symlink: {name}')
-            if any(part.lower() in BAD_NAMES for part in parts) or path.suffix.lower() in BAD_SUFFIXES:
+            if (any(part.lower() in BAD_NAMES for part in parts) or path.suffix.lower() in BAD_SUFFIXES
+                    or ROM_DERIVED_SOURCE.fullmatch(path.name)):
                 errors.append(f'forbidden file: {name}')
             if path.name.lower() in GAME_MODULE_NAMES and name not in GAME_MODULE_PATHS:
                 errors.append(f'game module outside canonical release path: {name}')

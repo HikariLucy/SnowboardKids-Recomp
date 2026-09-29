@@ -19,6 +19,7 @@ from .errors import (
     StoragePermissionError,
 )
 from .generator import collect_module_sources, find_corpus_dir, generate_rsp_code
+from .inputs import load_bundle
 from .manifest import generate_manifest_data, write_manifest_file
 from .rom import validate_rom
 from .toolchain import Toolchain, discover_toolchain
@@ -36,6 +37,8 @@ class BuilderConfig:
     keep_temp: bool = False
     debug: bool = False
     root_dir: Optional[Path] = None
+    inputs: Optional[Path] = None
+    engine: Optional[Path] = None
 
 
 @dataclass
@@ -139,12 +142,19 @@ class ModuleBuilderService:
         try:
             # CPU translations are the existing reviewed corpus, not fabricated work.
             notify("Locating recompiled game corpus", 3, 6)
-            corpus_dir = find_corpus_dir(self.root_dir)
+            if self.config.inputs:
+                # Corpus + RSP exported from this same ROM on a Linux/WSL2 machine.
+                inputs = load_bundle(self.config.inputs, rom_sha1, tmp_workspace / "inputs")
+                corpus_dir = inputs.corpus_dir
+                notify("Generating RSP audio microcode", 3, 6)
+                rsp_cpp = inputs.rsp_cpp
+            else:
+                corpus_dir = find_corpus_dir(self.root_dir)
 
-            # 3. Generate RSP microcode
-            notify("Generating RSP audio microcode", 3, 6)
-            rsp_dir = tmp_workspace / "rsp"
-            rsp_cpp = generate_rsp_code(self.root_dir, rom_bytes, rsp_dir)
+                # 3. Generate RSP microcode
+                notify("Generating RSP audio microcode", 3, 6)
+                rsp_dir = tmp_workspace / "rsp"
+                rsp_cpp = generate_rsp_code(self.root_dir, rom_bytes, rsp_dir)
 
             # 4. Gather CPU translation units
             sources, include_dirs = collect_module_sources(self.root_dir, corpus_dir, rsp_cpp,
@@ -178,7 +188,8 @@ class ModuleBuilderService:
 
             # 6. Validate ABI
             notify("Validating module ABI and exported symbols", 6, 6)
-            metadata = validate_module_binary(temp_out_library, self.root_dir)
+            metadata = validate_module_binary(temp_out_library, self.root_dir,
+                                              engine=self.config.engine)
 
             # Generate manifest
             manifest_data = generate_manifest_data(metadata, rom_sha1)
