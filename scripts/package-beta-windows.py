@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and package the Windows x86_64 Snowboard Kids Recompiled archive.
+r"""Stage and package the Windows x86_64 Snowboard Kids Recompiled archive.
 
 Windows counterpart of scripts/package-beta-linux.sh; both end in the shared
 package_release.py / audit / readiness gates. Steps:
@@ -7,12 +7,21 @@ package_release.py / audit / readiness gates. Steps:
   1. refuse a dirty tree (release mode);
   2. run SnowboardKidsEngine.exe --version and match HEAD + project version;
   3. run --validate-module on the reviewed SnowboardKidsGame.dll;
-  4. derive runtime DLLs from the real PE imports (scripts/windows_runtime.py);
-  5. stage reviewed assets, build the deterministic zip, audit it, and run the
+  4. derive runtime DLLs from the real PE imports (scripts/windows_runtime.py),
+     require the pinned DXC release bytes (scripts/dxc_redist.py), their
+     license texts and a recorded dxil.dll redistribution decision;
+  5. write RUNTIME-DLLS.txt (hash, version, provenance, notices per DLL);
+  6. stage reviewed assets, build the deterministic zip, audit it, and run the
      public-beta readiness gate.
 
+Public package (any blocker stops it):
+
+  python scripts\package-beta-windows.py --engine build-engine\SnowboardKidsEngine.exe ^
+      --game-module "%APPDATA%\SnowboardKids\modules\snowboardkids-us\SnowboardKidsGame.dll"
+
 --engine-only-draft packages the ROM-free engine without a game module for CI
-review. Draft archives are never release candidates.
+review. Drafts say so in BUILD-INFO.txt and their file name, leave out DLLs
+whose redistribution is not cleared, and are never release candidates.
 """
 import argparse
 import os
@@ -25,7 +34,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from windows_runtime import msvc_redist_dirs, resolve_runtime  # noqa: E402
+import dxc_redist  # noqa: E402
+from windows_runtime import msvc_redist_dirs, resolve_runtime, runtime_manifest  # noqa: E402
 
 
 def project_version() -> str:
@@ -108,16 +118,24 @@ def main() -> int:
         print(f"  bundled  {name}  ({path})")
     if runtime.errors:
         return fail("runtime dependency policy:\n  " + "\n  ".join(runtime.errors))
+    # Every gate below fails a public package. A draft may only drop DLLs whose
+    # redistribution is not cleared; it never ships unverified bytes.
+    blockers = runtime.pinned_hash_errors() + dxc_redist.verify_license_texts(ROOT)
     license_files = runtime.license_files(ROOT)
-    missing_texts = sorted(notice for notice, path in license_files.items() if not path.is_file())
-    for notice in missing_texts:
-        del license_files[notice]
-    pending = runtime.pending_licenses() + [f"{notice} (license text not bootstrapped)" for notice in missing_texts]
+    blockers += [f"license text for {notice} not found: {path}"
+                 for notice, path in sorted(license_files.items()) if not path.is_file()]
+    if blockers:
+        return fail("runtime redistribution:\n  " + "\n  ".join(blockers))
+    pending = runtime.pending_licenses(ROOT)
     if pending:
-        message = ("bundled DLLs without reviewed license text in the pinned tree: " + ", ".join(pending))
+        message = "bundled DLLs whose redistribution is not cleared: " + ", ".join(pending)
         if not draft:
-            return fail(message + "\nAdd and review their license texts before a public Windows package.")
-        print(f"WARNING (draft only): {message}")
+            return fail(message + f"\nSee {dxc_redist.DXIL_DECISION.as_posix()} and docs/DXC-PROVENANCE.md.")
+        withheld = [name for name in runtime.bundled if any(p.startswith(name) for p in pending)]
+        for name in withheld:
+            del runtime.bundled[name]
+        print(f"WARNING (draft only): {message}; left out of the draft: {', '.join(withheld)}")
+        license_files = runtime.license_files(ROOT)
 
     out_dir = args.out_dir.resolve()
     staging = out_dir / "staging-windows"
@@ -129,11 +147,13 @@ def main() -> int:
     subprocess.run([sys.executable, str(ROOT / "scripts" / "stage_ui_assets.py"), "--out", str(assets)], check=True)
     if archive.exists():
         archive.unlink()
+    manifest = staging / "RUNTIME-DLLS.txt"
+    manifest.write_text(runtime_manifest(runtime), encoding="utf-8", newline="\n")
 
     cmd = [sys.executable, str(ROOT / "scripts" / "package_release.py"),
            "--binary", str(engine), "--assets", str(assets), "--version", version,
            "--commit", git("rev-parse", "HEAD"), "--platform", "windows",
-           "--architecture", "x86_64", "--out", str(archive)]
+           "--architecture", "x86_64", "--out", str(archive), "--runtime-manifest", str(manifest)]
     for path in runtime.bundled.values():
         cmd += ["--library", str(path)]
     for notice, path in sorted(license_files.items()):

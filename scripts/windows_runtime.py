@@ -7,10 +7,12 @@ game module (scripts/pe_imports.py), never from a hand-written guess. An import
 that is neither a known system DLL nor a reviewed redistributable fails staging.
 """
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
 
+import dxc_redist
 from pe_imports import read_imports_file
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,37 +31,49 @@ SYSTEM_DLLS = frozenset({
 SYSTEM_PREFIXES = ("api-ms-win-", "ext-ms-win-")
 
 # License evidence kinds for a bundled DLL:
-#   "text"         the license text at `license` ships in licenses/<notice>.txt
+#   "text"         every text in `licenses` ships as licenses/<notice>.txt
+#   "ms-terms"     "text", plus Microsoft distributable-code terms whose
+#                  distribution requirements need a recorded maintainer
+#                  decision (dxc_redist.DXIL_DECISION) before a public package
 #   "msvc-redist"  Microsoft Visual C++ Redistributable "Distributable Code";
 #                  app-local deployment per the Visual Studio license terms
-#   "pending"      no reviewed license text in the pinned tree: blocks public
-#                  packages until the text is added and reviewed
+#   "pending"      no reviewed license text: blocks public packages
 @dataclass(frozen=True)
 class Redistributable:
     name: str
     source: str
     notice: str
     evidence: str
-    license: Optional[str] = None
+    licenses: Tuple[Tuple[str, str], ...] = ()  # (licenses/<notice>.txt, repo path)
     companions: Tuple[str, ...] = ()
+    provenance: str = ""
+    version: str = ""
+    sha256: Optional[str] = None  # when set, the bundled bytes must match
 
 
 _SDL2_DIR = ".deps-renderer/rt64/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3"
 _MSVC_SOURCE = "Microsoft Visual C++ Redistributable (VCToolsRedistDir, app-local)"
+_DXC_DIR = (dxc_redist.INSTALL_DIR / "bin" / "x64").as_posix()
+
+
+def _dxc(name: str, evidence: str, companions: Tuple[str, ...] = ()) -> Redistributable:
+    entry = dxc_redist.DLLS[name]
+    licenses = tuple((notice, (dxc_redist.LICENSE_DIR / text).as_posix())
+                     for notice, text in entry["notices"].items())
+    return Redistributable(name, _DXC_DIR, next(iter(entry["notices"])), evidence, licenses, companions,
+                           dxc_redist.PROVENANCE, entry["version"], dxc_redist.FILES[entry["member"]])
 
 REDISTRIBUTABLES: Dict[str, Redistributable] = {r.name.lower(): r for r in (
-    Redistributable("SDL2.dll", f"{_SDL2_DIR}/lib/x64", "SDL2", "text", f"{_SDL2_DIR}/COPYING.txt"),
-    Redistributable("dxcompiler.dll", ".deps-renderer/rt64/src/contrib/dxc/bin/x64",
-                    "DirectXShaderCompiler", "pending", companions=("dxil.dll",)),
-    Redistributable("dxil.dll", ".deps-renderer/rt64/src/contrib/dxc/bin/x64",
-                    "DirectXShaderCompiler-dxil", "pending"),
-    Redistributable("vcruntime140.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("vcruntime140_1.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("msvcp140.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("msvcp140_1.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("msvcp140_2.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("msvcp140_atomic_wait.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
-    Redistributable("concrt140.dll", _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist"),
+    Redistributable("SDL2.dll", f"{_SDL2_DIR}/lib/x64", "SDL2", "text",
+                    (("SDL2", f"{_SDL2_DIR}/COPYING.txt"),),
+                    provenance="SDL2 2.26.3 from RT64's pinned mupen64plus-win32-deps submodule (SDL2-2.26.3/lib/x64)",
+                    version="2.26.3"),
+    _dxc("dxcompiler.dll", "text", companions=("dxil.dll",)),
+    _dxc("dxil.dll", "ms-terms"),
+    *(Redistributable(name, _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist",
+                      provenance="Microsoft Visual C++ Redistributable (build machine VCToolsRedistDir)")
+      for name in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll",
+                   "msvcp140_2.dll", "msvcp140_atomic_wait.dll", "concrt140.dll")),
 )}
 
 
@@ -82,17 +96,41 @@ class RuntimeResolution:
     system: List[str]
     errors: List[str]
 
-    def pending_licenses(self) -> List[str]:
-        return sorted({REDISTRIBUTABLES[n.lower()].name for n in self.bundled
-                       if REDISTRIBUTABLES[n.lower()].evidence == "pending"})
+    def pending_licenses(self, root: Path = ROOT) -> List[str]:
+        """Bundled DLLs whose redistribution is not cleared yet."""
+        pending = set()
+        for name in self.bundled:
+            entry = REDISTRIBUTABLES[name.lower()]
+            if entry.evidence == "pending":
+                pending.add(entry.name)
+            elif entry.evidence == "ms-terms" and not dxc_redist.dxil_redistribution_accepted(root):
+                pending.add(f"{entry.name} (Microsoft distributable-code terms not accepted in "
+                            f"{dxc_redist.DXIL_DECISION.as_posix()})")
+        return sorted(pending)
 
     def license_files(self, root: Path = ROOT) -> Dict[str, Path]:
         files = {}
         for name in self.bundled:
             entry = REDISTRIBUTABLES[name.lower()]
-            if entry.evidence == "text" and entry.license:
-                files[entry.notice] = root / entry.license
+            if entry.evidence in ("text", "ms-terms"):
+                for notice, path in entry.licenses:
+                    files[notice] = root / path
         return files
+
+    def pinned_hash_errors(self) -> List[str]:
+        """Bundled DLLs with a pinned SHA-256 must be exactly those bytes."""
+        errors = []
+        for name, path in self.bundled.items():
+            entry = REDISTRIBUTABLES[name.lower()]
+            if entry.sha256 and sha256_file(path) != entry.sha256:
+                errors.append(f"{name} at {path} is not the pinned {entry.provenance} binary "
+                              f"(SHA-256 {entry.sha256}); run: python scripts/bootstrap.py --only dxc "
+                              "and rebuild the engine")
+        return errors
+
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def resolve_runtime(images: Iterable[Path], search_dirs: Iterable[Path]) -> RuntimeResolution:
@@ -143,3 +181,38 @@ def resolve_runtime(images: Iterable[Path], search_dirs: Iterable[Path]) -> Runt
                 require(name, image.name)
 
     return RuntimeResolution(dict(sorted(bundled.items())), sorted(system), errors)
+
+
+def pe_file_version(path: Path) -> str:
+    """FileVersion string from a PE version resource, or "" if absent."""
+    text = Path(path).read_bytes().decode("utf-16-le", "ignore")
+    marker = text.find("FileVersion\0")
+    if marker < 0:
+        return ""
+    value = text[marker + len("FileVersion\0"):].lstrip("\0")
+    return value.split("\0", 1)[0].strip()
+
+
+MANIFEST_HEADER = "Snowboard Kids Recompiled - Windows runtime DLLs\nFormat: 1\n"
+
+
+def runtime_manifest(resolution: RuntimeResolution) -> str:
+    """Deterministic RUNTIME-DLLS.txt: no paths, only names, hashes and provenance."""
+    lines = [MANIFEST_HEADER]
+    for name, path in sorted(resolution.bundled.items(), key=lambda item: item[0].lower()):
+        entry = REDISTRIBUTABLES[name.lower()]
+        notices = [f"licenses/{notice}.txt" for notice, _ in entry.licenses]
+        if entry.evidence == "msvc-redist":
+            notices = ["Visual Studio license terms (Microsoft Visual C++ Redistributable)"]
+        lines += [
+            f"[bundled] {name}",
+            f"sha256: {sha256_file(path)}",
+            f"version: {entry.version or pe_file_version(path) or 'unknown'}",
+            f"provenance: {entry.provenance or entry.source}",
+            f"evidence: {entry.evidence}",
+            f"licenses: {', '.join(notices) if notices else 'none'}",
+            "",
+        ]
+    for name in resolution.system:
+        lines += [f"[system] {name}", "provenance: Windows system DLL, never bundled", ""]
+    return "\n".join(lines)

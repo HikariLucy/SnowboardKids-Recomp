@@ -39,7 +39,11 @@ def main():
     parser.add_argument('--architecture', default='x86_64')
     parser.add_argument('--draft', action='store_true',
                         help='Local audit draft while license/source blockers remain; never upload')
+    parser.add_argument('--runtime-manifest', type=Path, default=None,
+                        help='Windows: RUNTIME-DLLS.txt describing every bundled runtime DLL')
     args = parser.parse_args()
+    if args.draft and args.public_beta:
+        parser.error('--draft and --public-beta are mutually exclusive')
     notices = (ROOT / 'THIRD_PARTY_NOTICES.md').read_bytes()
     if (b'BLOCKER' in notices or b'RELEASE_BLOCKER' in notices) and not args.draft:
         parser.error('third-party license/source review has blocker entries')
@@ -62,13 +66,18 @@ def main():
     from dependency_lock import compute_lock_digest
     commit = args.commit if args.commit is not None else get_git_commit()
     lock_digest = compute_lock_digest()
+    # A draft must never be mistaken for a release, even out of context.
+    kind = ('draft (not a release candidate; do not distribute)' if args.draft
+            else 'public-beta' if args.public_beta else 'release')
     manifest = (
         f"Project: Snowboard Kids Recompiled\n"
+        f"Package: {kind}\n"
         f"Version: {args.version}\n"
         f"Commit: {commit}\n"
         f"Platform: {args.platform}\n"
         f"Architecture: {args.architecture}\n"
         f"Dependency-Lock-Digest: {lock_digest}\n"
+        + (f"Runtime-DLLs: RUNTIME-DLLS.txt\n" if args.runtime_manifest else "")
     ).encode('utf-8')
     binary_bytes = args.binary.read_bytes()
     import shutil
@@ -112,6 +121,10 @@ def main():
             parser.error(f'game module must use a canonical filename, got: {module.name}')
         files.append((f'modules/snowboardkids-us/{module.name}', module.read_bytes(), False))
 
+    if args.runtime_manifest is not None:
+        if not args.runtime_manifest.is_file():
+            parser.error(f'runtime manifest not found: {args.runtime_manifest}')
+        files.append(('RUNTIME-DLLS.txt', args.runtime_manifest.read_bytes(), False))
     for library in args.library:
         if not library.is_file() or library.is_symlink():
             parser.error(f'invalid shared library: {library}')

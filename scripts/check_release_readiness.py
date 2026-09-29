@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Explicit release gate: verify licensing, provenance, and individual blockers."""
 import argparse
+import hashlib
 from pathlib import Path
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from dependency_lock import DEPENDENCIES
+import dxc_redist
 from stage_ui_assets import validate_assets, validate_archive
 
 
@@ -131,7 +133,40 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
         blockers.append(("game_distribution_model",
                          "public release requires --public-beta plus an audited archive containing the reviewed game module"))
 
+    # 8. Windows runtime redistribution: bundled DXC bytes are the pinned
+    # official release, their license texts are the pinned upstream texts, and
+    # dxil.dll ships only after the maintainer recorded the Microsoft
+    # distributable-code decision. Linux archives carry no DXC.
+    if archive is not None:
+        name, detail = check_windows_runtime(Path(archive), root)
+        if name is not None:
+            (passes if detail.startswith("ok:") else blockers).append((name, detail))
+
     return passes, blockers
+
+
+def check_windows_runtime(archive, root=ROOT):
+    try:
+        with zipfile.ZipFile(archive) as bundle:
+            names = set(bundle.namelist())
+            if "SnowboardKidsRecompiled/SnowboardKidsEngine.exe" not in names:
+                return None, ""
+            problems = list(dxc_redist.verify_license_texts(root))
+            for dll, entry in dxc_redist.DLLS.items():
+                member = next((n for n in names if n.lower() == f"snowboardkidsrecompiled/{dll}"), None)
+                if member is None:
+                    continue
+                digest = hashlib.sha256(bundle.read(member)).hexdigest()
+                if digest != dxc_redist.FILES[entry["member"]]:
+                    problems.append(f"{dll} is not the pinned {dxc_redist.PROVENANCE} binary")
+                if dll == "dxil.dll" and not dxc_redist.dxil_redistribution_accepted(root):
+                    problems.append(f"dxil.dll redistribution decision is not ACCEPTED in "
+                                    f"{dxc_redist.DXIL_DECISION.as_posix()}")
+    except (OSError, zipfile.BadZipFile, RuntimeError) as error:
+        return "windows_runtime_redistribution", str(error)
+    if problems:
+        return "windows_runtime_redistribution", "; ".join(problems)
+    return "windows_runtime_redistribution", "ok: bundled DXC matches the pinned release and its notices"
 
 
 def main():
