@@ -1,3 +1,6 @@
 # Dependency patch context lines reproduce upstream bytes, including
 # whitespace-only lines; they must not be "fixed".
 *.patch -whitespace
+
+# Vendored upstream license texts: byte-exact (CRLF, trailing spaces), pinned by SHA-256
+licenses/DirectXShaderCompiler/* -text -whitespace

@@ -587,14 +587,21 @@ if(SBK_BUILD_NATIVE_BOOT)
         set_property(TARGET SnowboardKidsEngine APPEND PROPERTY LINK_DEPENDS "${SBK_ENGINE_DEF}")
 
         # Runtime DLLs the executables load at startup: SDL2 (imported target)
-        # and RT64's DirectX shader compiler, which rt64 links by import
-        # library. Release staging re-derives the set from the PE imports.
+        # and the DirectX shader compiler, which rt64 links by import library.
+        # DXC comes from the pinned official Microsoft release (scripts/dxc_redist.py),
+        # not RT64's contrib copy, whose dxcompiler.dll has no verifiable
+        # provenance (docs/DXC-PROVENANCE.md). Release staging re-derives the
+        # set from the PE imports and checks the DXC hashes.
+        set(SBK_DXC_REDIST_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/dxc-redist/v1.7.2308/bin/x64")
+        if(NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxcompiler.dll" OR NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxil.dll")
+            message(FATAL_ERROR "Pinned DirectX Shader Compiler release missing. Run: python scripts/bootstrap.py --only dxc")
+        endif()
         foreach(SBK_EXE ${SBK_APP_TARGETS})
             add_custom_command(TARGET ${SBK_EXE} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     $<TARGET_RUNTIME_DLLS:${SBK_EXE}>
-                    "${RT64_DIR}/src/contrib/dxc/bin/x64/dxcompiler.dll"
-                    "${RT64_DIR}/src/contrib/dxc/bin/x64/dxil.dll"
+                    "${SBK_DXC_REDIST_DIR}/dxcompiler.dll"
+                    "${SBK_DXC_REDIST_DIR}/dxil.dll"
                     "$<TARGET_FILE_DIR:${SBK_EXE}>"
                 COMMAND_EXPAND_LISTS)
         endforeach()
