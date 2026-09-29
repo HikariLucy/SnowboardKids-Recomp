@@ -13,8 +13,8 @@ You supply your own legally dumped **Snowboard Kids (USA)** ROM image
 ## 1. First run
 
 1. Extract the release archive.
-2. Run `./SnowboardKidsEngine` (Linux) or `SnowboardKidsEngine.exe` (Windows
-   development builds only — Windows is not a supported release platform yet).
+2. Run `./SnowboardKidsEngine` (Linux) or `SnowboardKidsEngine.exe` (Windows).
+   Both Linux x86_64 and Windows x86_64 are supported by the public beta.
 3. Select your own supported Snowboard Kids (USA) ROM when prompted.
 4. The engine validates the ROM and the bundled game module, then starts the game.
 5. The selected ROM path is remembered in your user-data directory.
