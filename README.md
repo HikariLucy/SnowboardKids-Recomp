@@ -1,73 +1,101 @@
-# SnowboardKids-Recomp
+<div align="center">
 
-Native PC recompilation/port of **Snowboard Kids (Nintendo 64, USA)** built on the modern N64 recompilation ecosystem.
+# Snowboard Kids Recompiled
 
+**Native PC recompilation of Snowboard Kids (Nintendo 64)**<br>
+Powered by **N64Recomp**, **RT64**, **RecompFrontend**, and **N64ModernRuntime**.
+
+[![Release](https://img.shields.io/github/v/release/HikariLucy/SnowboardKids-Recomp?include_prereleases&label=release)](https://github.com/HikariLucy/SnowboardKids-Recomp/releases)
+[![ROM-free CI](https://github.com/HikariLucy/SnowboardKids-Recomp/actions/workflows/ci.yml/badge.svg)](https://github.com/HikariLucy/SnowboardKids-Recomp/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
+![Linux](https://img.shields.io/badge/Linux-beta-success)
+![Windows](https://img.shields.io/badge/Windows-in%20progress-orange)
+
+**[Download v0.9.0-beta](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta)** ·
+[Quick Start](#quick-start) ·
+[Roadmap](docs/ROADMAP.md) ·
+[Running Guide](RUNNING.md) ·
+[Report an Issue](https://github.com/HikariLucy/SnowboardKids-Recomp/issues)
+
+</div>
+
+> [!IMPORTANT]
 > **No ROM is included or downloaded by this project.** You must provide your own supported Snowboard Kids (USA) ROM dump.
 
-## Status
+## What is Snowboard Kids Recompiled?
 
-**Core PC port: complete and playable — `v0.9.0-beta` release candidate.**
+Snowboard Kids Recompiled is a native PC recompilation project for **Snowboard Kids (Nintendo 64, USA)**.
 
-The current build has been validated in real play sessions, not only automated tests:
+The goal is to make the original game run as a modern native PC application while preserving the original game logic and adding a cleaner desktop experience around it: modern rendering, configurable input, Controller Pak persistence, savestates, frontend settings, and reproducible release packaging.
 
-- Full race start → finish → results → next race: **PASS**
-- Official in-game save → close game → reopen → saved progress restored: **PASS**
-- Savestates with **F5 / F8**, including restore after closing and reopening the game: **PASS**
-- Keyboard play: **PASS**
-- Physical controller play: **PASS**
-- Physical rumble: **PASS**
-- Controller remapping and persistence: **PASS**
-- Master Volume and accessibility settings: **PASS**
-- Controller Pak persistence: **PASS**
-- Linux live runtime: **PASS**
-- Linux and Windows ROM-free CI: **GREEN**
-- Windows D3D12/VSync renderer stack: **COMPILE PASS**; live Windows validation is still pending
+This is **not an emulator distribution** and the repository does not provide the commercial game ROM or extracted commercial assets.
 
-The remaining roadmap work is primarily release packaging, Windows live validation and post-launch enhancements, not basic playability.
+## Current status
 
-**First public release: `v0.9.0-beta` (Linux x86-64 first).**
+| Platform | Status | Notes |
+| --- | --- | --- |
+| **Linux x86_64** | ✅ Public beta | Live gameplay validated and downloadable as <code>v0.9.0-beta</code> |
+| **Windows x86_64** | 🚧 In progress | ROM-free engine and module-binding infrastructure validated in CI; real game-module and live gameplay validation pending. No Windows download yet — see [docs/WINDOWS.md](docs/WINDOWS.md) |
+
+The Linux beta has been validated in real play sessions, including:
+
+- Full race start → finish → results → next race
+- Official in-game save → close → reopen → progress restored
+- Quick savestates with **F5 / F8**
+- Keyboard gameplay
+- Physical controller gameplay
+- Physical rumble
+- Controller remapping and persistence
+- Master Volume and accessibility settings
+- Controller Pak persistence
+
+Windows x86_64 is **in development**. CI builds the ROM-free <code>SnowboardKidsEngine.exe</code> with clang-cl (RT64, RecompFrontend and N64ModernRuntime included) and verifies the engine ↔ game-module binding with a synthetic module. The real <code>SnowboardKidsGame.dll</code>, a complete Windows package and live Windows gameplay have **not** been validated yet, so there is no Windows release. Progress and developer build notes: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Quick start
 
-### Recommended: release build
+### Linux beta
 
-For the public beta:
+1. Download **[v0.9.0-beta](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta)**.
+2. Extract <code>SnowboardKidsRecompiled-0.9.0-beta-Linux-x86_64.zip</code>.
+3. Run:
 
-1. Download the Linux x86-64 archive from **GitHub Releases**.
-2. Extract it to a normal writable folder.
-3. Launch **SnowboardKidsEngine**.
-4. Select your own supported Snowboard Kids (USA) ROM when prompted.
-5. The engine validates the ROM and starts the bundled reviewed game module.
-6. Future launches remember the selected ROM path.
+~~~bash
+./SnowboardKidsEngine
+~~~
 
-The public beta does **not** require a compiler, Python setup, ROM extraction or
-a separate build step. It still requires the user's original supported ROM.
+4. Select your own supported **Snowboard Kids (USA)** ROM when prompted.
+5. The engine validates the ROM and launches the bundled reviewed game module.
 
-### Supported ROM
+The public beta does **not** require a compiler, Python setup, ROM extraction, or a separate build step.
 
-The initial public beta intentionally supports one verified Snowboard Kids (USA) corpus.
+## Highlights
 
-Expected normalized SHA-1:
-
-```text
-1583bacc9046a360df8ea4d536942155247e154c
-```
-
-Game code:
-
-```text
-NSKE
-```
-
-The first-run builder accepts `.z64`, `.v64`, and `.n64` byte-order variants when they normalize to the supported dump.
-
-A filename or matching game ID alone is **not** sufficient. Unsupported revisions/regions are rejected instead of being run with incorrect addresses.
+- Native executable runtime
+- RT64-powered rendering
+- Split **engine + game module** architecture
+- Local ROM validation
+- Controller Pak persistence
+- Cross-session saves
+- Quick save / quick load
+- Keyboard and controller input
+- Controller remapping
+- Physical rumble
+- Windowed and borderless modes
+- Original 4:3 and expanded aspect modes
+- Internal resolution scaling
+- MSAA
+- HUD placement controls
+- VSync where supported
+- Master Volume
+- Reduced Motion accessibility setting
+- ROM-free Linux/Windows CI
+- Deterministic public-beta packaging and artifact auditing
 
 ## First-run architecture
 
-SnowboardKids-Recomp keeps the host engine and recompiled game module separate:
+The host engine and recompiled game logic are intentionally kept separate:
 
-```text
+~~~text
 SnowboardKidsEngine
         |
         +--> bundled SnowboardKidsGame module
@@ -80,113 +108,125 @@ Validate supported ROM
         |
         v
 Play
-```
+~~~
 
-The `v0.9.0-beta` archive contains a reviewed precompiled game module so normal
-players do not need a compiler. The module contains recompiled game logic but
-the release contains **no ROM and no extracted commercial game assets**.
+The public beta contains a reviewed precompiled game module so normal players do not need to compile anything.
 
-The original local module builder remains available for development and recovery
-workflows. See [RUNNING.md](RUNNING.md).
+The release contains **no ROM and no extracted commercial game assets**.
+
+Developers can still rebuild the module locally. See [RUNNING.md](RUNNING.md).
+
+## Supported ROM
+
+The initial beta intentionally supports one verified **Snowboard Kids (USA)** corpus.
+
+Normalized SHA-1:
+
+~~~text
+1583bacc9046a360df8ea4d536942155247e154c
+~~~
+
+Game code:
+
+~~~text
+NSKE
+~~~
+
+Supported input formats:
+
+- <code>.z64</code>
+- <code>.v64</code>
+- <code>.n64</code>
+
+Byte-order variants are normalized before validation. A matching filename or game ID alone is not enough; unsupported revisions and regions are rejected.
 
 ## Playing
 
-Open the in-game PC settings overlay with:
+Open the PC settings overlay with:
 
-```text
+~~~text
 Escape
-```
+~~~
 
 Savestates:
 
-```text
+~~~text
 F5  Quick Save
 F8  Quick Load
-```
+~~~
 
-Controls can be remapped from the **Controls** page. Keyboard and controller profiles persist between sessions.
+Controls can be remapped from the **Controls** page and persist between sessions.
 
-The PC frontend currently includes:
-
-- Windowed and Borderless modes
-- Original 4:3 and Expand aspect modes
-- Internal resolution scaling
-- MSAA
-- HUD placement
-- VSync On/Off where supported
-- Keyboard/controller remapping
-- Multiplayer input foundation
-- Master Volume
-- Reduced Motion
-- Savestates
-- Original Controller Pak persistence
-- Physical controller rumble
-
-See [RUNNING.md](RUNNING.md) for complete controls, user-data locations and troubleshooting.
+For complete controls, user-data locations and troubleshooting, see [RUNNING.md](RUNNING.md).
 
 ## Saves and user data
 
-The port keeps PC configuration, Controller Pak data, savestates and locally generated modules outside the installation directory.
+PC configuration, Controller Pak data, savestates and locally generated modules live outside the installation directory.
 
 Typical locations:
 
-- Linux: `~/.local/share/SnowboardKids`
-- Windows: `%APPDATA%\SnowboardKids`
+- Linux: <code>~/.local/share/SnowboardKids</code>
+- Windows: <code>%APPDATA%\SnowboardKids</code>
 
-Savestates use `.sbks`.
+Formats:
 
-Controller Pak persistence uses `.mpk`.
+- Savestates: <code>.sbks</code>
+- Controller Pak persistence: <code>.mpk</code>
 
-Savestates intentionally do **not** rewind Controller Pak storage. This keeps the original persistent save medium independent from temporary execution-state snapshots.
+Savestates intentionally do **not** rewind Controller Pak storage. The original persistent save medium remains independent from temporary execution-state snapshots.
+
+## Roadmap
+
+### Completed
+
+- [x] Native playable Linux runtime
+- [x] RT64 renderer integration
+- [x] Modern frontend/settings foundation
+- [x] Controller Pak persistence
+- [x] Savestates
+- [x] Physical controller and rumble support
+- [x] Linux public beta packaging
+- [x] First public release: <code>v0.9.0-beta</code>
+
+### In progress
+
+- [ ] Windows x86_64: real game-module (<code>SnowboardKidsGame.dll</code>) build and validation
+- [ ] Windows x86_64 distributable build
+- [ ] Live Windows gameplay validation
+- [ ] Broader full-game QA
+
+### Later
+
+- [ ] Additional graphics and UX enhancements
+- [ ] Widescreen / ultrawide feasibility
+- [ ] Higher-framerate feasibility
+- [ ] Mod support and mod templates
+- [ ] Additional ROM revisions / regions
+- [ ] Performance profiling and optimization
+- [ ] Further accessibility improvements
+- [ ] Android ARM64 / Vulkan research
+
+See the full [roadmap](docs/ROADMAP.md).
 
 ## Build from source
 
 Normal players should use a release build. Building from source is mainly for contributors and development.
 
-Clone the repository and bootstrap the exact pinned dependencies:
-
-```bash
+~~~bash
 git clone https://github.com/HikariLucy/SnowboardKids-Recomp.git
 cd SnowboardKids-Recomp
 bash scripts/bootstrap.sh
-```
+~~~
 
-For detailed Linux build requirements, ROM/module generation, development options and troubleshooting, see:
+For detailed build requirements and developer workflows:
 
-- [RUNNING.md](RUNNING.md)
+- [Running and building](RUNNING.md)
 - [Release engineering](docs/RELEASE-ENGINEERING.md)
 - [Roadmap](docs/ROADMAP.md)
+- [Current status](docs/STATUS.md)
+- [Windows development status](docs/WINDOWS.md)
 
 Public CI is ROM-free and never uploads or stores a commercial ROM.
-
-## Platform status
-
-### Linux
-
-**Primary validated platform.**
-
-The game has been played through full races with keyboard and a physical controller, with saving, rumble and savestates working in live use.
-
-### Windows
-
-The Windows ROM-free suite, MSVC/clang-cl Controller Pak tests, RT64, RecompFrontend and D3D12/VSync code all compile and pass in GitHub Actions.
-
-Windows is **in development**: CI also builds the ROM-free `SnowboardKidsEngine.exe` and exercises the Windows game-module binding with a synthetic module. No Windows release exists yet; a live Windows gameplay validation is still required before Windows is described as supported. Status and build notes: [`docs/WINDOWS.md`](docs/WINDOWS.md).
-
-## Project scope
-
-The PC port is considered playable for the first public beta. Features such as the following are **post-release roadmap work**, not blockers for opening the repository:
-
-- true widescreen / ultrawide
-- higher-framerate feasibility
-- mod support and mod templates
-- formal performance profiling and later optimization
-- additional ROM revisions/regions
-- further accessibility polish
-- Android ARM64/Vulkan
-- mobile/touch controls
-
-See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Development and CI
 
@@ -194,7 +234,7 @@ The project has ROM-free automated coverage for major host/runtime systems inclu
 
 - Controller Pak persistence
 - cross-process persistence
-- savestate codec/restore
+- savestate codec and restore
 - input/deadzone behavior
 - audio progress and host gain
 - configuration persistence
@@ -210,34 +250,35 @@ Generated game code, ROMs, saves and local user configuration must never be comm
 This project builds on work from the N64 recompilation community, including:
 
 - [N64Recomp](https://github.com/N64Recomp/N64Recomp)
+- [RT64](https://github.com/rt64/rt64)
+- [N64ModernRuntime](https://github.com/N64Recomp/N64ModernRuntime)
 - [RecompFrontend](https://github.com/N64Recomp/RecompFrontend)
 - [Snowboard Kids matching decompilation](https://github.com/cdlewis/snowboardkids-decomp)
-- RT64 / N64ModernRuntime and their transitive dependencies
 
-Exact revisions are pinned in `scripts/dependency_lock.py`.
+Exact revisions are pinned in <code>scripts/dependency_lock.py</code>.
 
-## License and redistribution status
+## License and redistribution
 
-Project-authored source is released under **GNU GPL version 3**; see [LICENSE](LICENSE).
+Project-authored source is released under **GNU GPL version 3**. See [LICENSE](LICENSE).
 
-N64ModernRuntime is GPL-3.0 licensed. Corresponding-source/build directions for
-the engine are documented in [SOURCE-COMPLIANCE.md](SOURCE-COMPLIANCE.md).
+N64ModernRuntime is GPL-3.0 licensed. Corresponding-source and build directions for the engine are documented in [SOURCE-COMPLIANCE.md](SOURCE-COMPLIANCE.md).
 
-The pinned RecompFrontend repository currently has **no top-level license grant**.
-Clarification is pending in
-[N64Recomp/RecompFrontend#44](https://github.com/N64Recomp/RecompFrontend/issues/44).
-The public beta proceeds with that uncertainty explicitly disclosed rather than
-claiming a license that upstream has not stated.
+The pinned RecompFrontend repository currently has **no top-level license grant**. Clarification is pending in [N64Recomp/RecompFrontend#44](https://github.com/N64Recomp/RecompFrontend/issues/44).
 
-See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and
-[docs/BETA-DISTRIBUTION-POLICY.md](docs/BETA-DISTRIBUTION-POLICY.md) before
-redistributing a binary build.
+The public beta proceeds with that uncertainty explicitly disclosed rather than claiming a license upstream has not stated.
+
+Before redistributing a binary build, see:
+
+- [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+- [Public beta distribution policy](docs/BETA-DISTRIBUTION-POLICY.md)
+- [Corresponding source](SOURCE-COMPLIANCE.md)
 
 ## Documentation
 
 - [Running the game](RUNNING.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Current status](docs/STATUS.md)
+- [Windows development status](docs/WINDOWS.md)
 - [Release engineering](docs/RELEASE-ENGINEERING.md)
 - [Controller Pak persistence](docs/CONTROLLER-PAK-PERSISTENCE.md)
 - [Original save-data map](docs/SAVE-DATA-MAP.md)
@@ -247,6 +288,6 @@ redistributing a binary build.
 
 ## Disclaimer
 
-SnowboardKids-Recomp is an unofficial preservation and reverse-engineering project.
+Snowboard Kids Recompiled is an unofficial preservation and reverse-engineering project.
 
 Snowboard Kids and related trademarks, game code, artwork, audio and other original game content belong to their respective rights holders. This repository does not provide the game ROM and is not affiliated with or endorsed by the original developers, publishers, Nintendo, Atlus or Racdym.
