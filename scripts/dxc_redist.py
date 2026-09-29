@@ -13,8 +13,9 @@ Windows builds use one official Microsoft release, pinned here by URL and
 SHA-256 (archive and every extracted file): its dxc.exe compiles RT64's and
 RecompFrontend's shaders at build time (via rt64-dxc-executable.patch) and its
 dxcompiler.dll is the only DXC file shipped. Since v1.8.2505 the compiler
-always validates and hashes ("signs") DXIL with its internal validator and
-never searches for dxil.dll, so no validator is extracted or shipped.
+always validates and hashes ("signs") DXIL with its internal validator (it
+still loads a dxil.dll it happens to find at startup, unused), so no
+validator is extracted or shipped.
 
     python scripts/dxc_redist.py            # fetch + verify (bootstrap --only dxc)
     python scripts/dxc_redist.py --verify   # verify only

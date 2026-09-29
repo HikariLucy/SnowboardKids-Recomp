@@ -322,8 +322,9 @@ int main(int argc, char **argv) {
         const TrivialShaders shaders = compileTrivial(compiler, out);
 
         // Everything DXC does in the engine is done by now. When a dxil.dll is
-        // findable (e.g. a Windows SDK on PATH), dxcompiler.dll may load it
-        // to query its version; --require-no-validator runs with none
+        // findable (e.g. a Windows SDK on PATH), dxcompiler.dll loads it once
+        // at startup (DllMain -> DxilLibInitialize) but validates and signs
+        // with its internal validator; --require-no-validator runs with none
         // findable and proves the whole path works without it.
         const std::wstring dxil = modulePath(L"dxil.dll");
         std::wprintf(L"dxil.dll loaded by the shader compiler: %ls\n", dxil.empty() ? L"no" : dxil.c_str());

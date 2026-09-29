@@ -604,8 +604,8 @@ if(SBK_BUILD_NATIVE_BOOT)
         # Runtime DLLs the executables load at startup: SDL2 (imported target)
         # and dxcompiler.dll from the pinned DXC release (SBK_DXC_REDIST_DIR,
         # above), which rt64 links by import library. No dxil.dll: this release
-        # never loads it. Release staging re-derives the set from the PE
-        # imports and checks the DXC hash.
+        # validates and signs shaders itself. Release staging re-derives the set
+        # from the PE imports and checks the DXC hash.
         foreach(SBK_EXE ${SBK_APP_TARGETS})
             add_custom_command(TARGET ${SBK_EXE} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
@@ -617,8 +617,9 @@ if(SBK_BUILD_NATIVE_BOOT)
 
         # ROM-free gate on RT64's run-time DXIL compile+link path: from its own
         # directory (dxcompiler.dll, no dxil.dll) it links RT64's shaders like
-        # RasterShader does, verifies they are hashed, that D3D12 (WARP) accepts
-        # them and that dxil.dll never loads (tests/renderer/dxc_runtime_probe.cpp).
+        # RasterShader does, verifies they are hashed and that D3D12 (WARP)
+        # accepts them (tests/renderer/dxc_runtime_probe.cpp). CI also runs it
+        # with no dxil.dll findable (--require-no-validator).
         add_executable(SnowboardKidsDxcRuntimeProbe tests/renderer/dxc_runtime_probe.cpp)
         set_target_properties(SnowboardKidsDxcRuntimeProbe PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/dxc-probe")

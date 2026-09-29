@@ -65,7 +65,7 @@ REDISTRIBUTABLES: Dict[str, Redistributable] = {r.name.lower(): r for r in (
                     (("SDL2", f"{_SDL2_DIR}/COPYING.txt"),),
                     provenance="SDL2 2.26.3 from RT64's pinned mupen64plus-win32-deps submodule (SDL2-2.26.3/lib/x64)",
                     version="2.26.3"),
-    # dxil.dll is deliberately absent: the pinned DXC never loads it, so any
+    # dxil.dll is deliberately absent: the pinned DXC never needs it, so any
     # image importing it fails staging as an unreviewed DLL.
     _dxc("dxcompiler.dll", "text"),
     *(Redistributable(name, _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist",
