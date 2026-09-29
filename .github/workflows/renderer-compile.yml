@@ -70,8 +70,8 @@ jobs:
         run: choco install ninja
       - name: Configure Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Bootstrap pinned dependencies and canonical patches
-        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme
+      - name: Bootstrap pinned dependencies, canonical patches and the DXC release
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme --only dxc
       - name: Configure ROM-free engine (clang-cl, engine-only)
         run: >-
           cmake -S . -B build-engine -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -101,8 +101,33 @@ jobs:
         run: cmake --build build-engine
       - name: Engine-only tests (includes synthetic module probe)
         run: ctest --test-dir build-engine --output-on-failure -V
+      - name: RT64 shaders compile with the pinned DXC release (DXIL signed by its dxil.dll)
+        run: python tests/release/dxc_release_compat.py --build build-engine
       - name: Stage ROM-free engine draft package
         run: python scripts/package-beta-windows.py --engine build-engine/SnowboardKidsEngine.exe --engine-only-draft --out-dir dist-windows
+      - name: Draft carries the pinned DXC, its notices and its provenance manifest
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist-windows -Filter *-engine-draft.zip | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          $names = $archive.Entries.FullName
+          $read = { param($n) $s = $archive.GetEntry("SnowboardKidsRecompiled/$n").Open(); (New-Object IO.StreamReader($s)).ReadToEnd() }
+          $info = & $read 'BUILD-INFO.txt'; $dlls = & $read 'RUNTIME-DLLS.txt'
+          $archive.Dispose()
+          $info; $dlls
+          foreach ($n in 'dxcompiler.dll', 'licenses/DirectXShaderCompiler-LICENSE-LLVM.txt',
+                   'licenses/DirectXShaderCompiler-LICENSE.txt', 'licenses/DirectXShaderCompiler-ThirdPartyNotices.txt',
+                   'RUNTIME-DLLS.txt', 'licenses/SDL2.txt') {
+            if ("SnowboardKidsRecompiled/$n" -notin $names) { throw "draft is missing $n" }
+          }
+          # dxil.dll waits for the maintainer decision in docs/DXIL-REDISTRIBUTION.md
+          $accepted = python -c "import sys; sys.path.insert(0, 'scripts'); import dxc_redist; print(dxc_redist.dxil_redistribution_accepted())"
+          if ($accepted -ne 'True' -and "SnowboardKidsRecompiled/dxil.dll" -in $names) { throw "dxil.dll shipped while the decision is pending" }
+          if ($info -notmatch 'Package: draft \(not a release candidate') { throw "draft not labelled as draft" }
+          if ($dlls -notmatch 'sha256: 570a1a7357893615417edf5ab356625b5b6b721a131bc7331bf17289d4928ed7') { throw "dxcompiler.dll is not the pinned release" }
+          python scripts/audit_release_artifact.py $zip.FullName
+          if ($LASTEXITCODE -ne 0) { throw "artifact audit failed" }
       - uses: actions/upload-artifact@v4
         with:
           name: SnowboardKidsEngine-Windows-x86_64-draft

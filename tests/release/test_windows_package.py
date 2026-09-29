@@ -15,9 +15,13 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 
-from audit_release_artifact import REDISTRIBUTABLE_DLLS, audit  # noqa: E402
+import hashlib  # noqa: E402
+
+import dxc_redist  # noqa: E402
+from audit_release_artifact import REDISTRIBUTABLE_DLLS, REQUIRED_NOTICES, audit  # noqa: E402
 from pe_imports import PeFormatError, read_imports  # noqa: E402
-from windows_runtime import REDISTRIBUTABLES, is_system_dll, resolve_runtime  # noqa: E402
+from windows_runtime import (REDISTRIBUTABLES, RuntimeResolution, is_system_dll,  # noqa: E402
+                             resolve_runtime, runtime_manifest)
 
 
 def make_pe(imports=(), delay_imports=()):
@@ -102,9 +106,20 @@ class RuntimePolicyTests(unittest.TestCase):
                              {'SDL2.dll', 'dxcompiler.dll', 'dxil.dll', 'vcruntime140.dll', 'msvcp140.dll'})
             self.assertNotIn('snowboardkidsengine.exe', result.system)
             self.assertIn('kernel32.dll', result.system)
-            # DXC has no reviewed license text in the pinned tree yet.
-            self.assertEqual(result.pending_licenses(), ['dxcompiler.dll', 'dxil.dll'])
-            self.assertIn('SDL2', result.license_files(ROOT))
+            # dxcompiler.dll is cleared by its vendored texts; dxil.dll waits
+            # for the recorded maintainer decision on Microsoft's terms.
+            pending = result.pending_licenses(ROOT)
+            if dxc_redist.dxil_redistribution_accepted(ROOT):
+                self.assertEqual(pending, [])
+            else:
+                self.assertEqual(len(pending), 1)
+                self.assertTrue(pending[0].startswith('dxil.dll'), pending)
+            files = result.license_files(ROOT)
+            self.assertEqual(set(files), {'SDL2', *dxc_redist.DLLS['dxcompiler.dll']['notices'],
+                                          *dxc_redist.DLLS['dxil.dll']['notices']})
+            # Synthetic stand-ins are not the pinned Microsoft binaries.
+            errors = result.pinned_hash_errors()
+            self.assertEqual(sorted(e.split()[0] for e in errors), ['dxcompiler.dll', 'dxil.dll'])
 
     def test_unknown_and_missing_dlls_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -134,38 +149,52 @@ class WindowsArchiveTests(unittest.TestCase):
             module.write_bytes(make_pe(['SnowboardKidsEngine.exe']))
             sdl = d / 'SDL2.dll'
             sdl.write_bytes(make_pe(['KERNEL32.dll']))
+            manifest = d / 'RUNTIME-DLLS.txt'
+            manifest.write_text(runtime_manifest(RuntimeResolution({'SDL2.dll': sdl}, ['kernel32.dll'], [])))
             archive = d / 'SnowboardKidsRecompiled-0.9.0-dev-Windows-x86_64.zip'
             subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'),
                             '--binary', str(engine), '--assets', str(assets), '--game-module', str(module),
                             '--library', str(sdl), '--license', f'SDL2={ROOT / "LICENSE"}',
+                            '--runtime-manifest', str(manifest),
                             '--public-beta', '--platform', 'windows', '--architecture', 'x86_64',
                             '--version', '0.9.0-dev', '--out', str(archive)], check=True)
             with zipfile.ZipFile(archive) as bundle:
                 names = set(bundle.namelist())
                 info = bundle.read('SnowboardKidsRecompiled/BUILD-INFO.txt').decode()
+                listed = bundle.read('SnowboardKidsRecompiled/RUNTIME-DLLS.txt').decode()
             for required in ('SnowboardKidsEngine.exe', 'SDL2.dll', 'licenses/SDL2.txt', 'LICENSE',
                              'modules/snowboardkids-us/SnowboardKidsGame.dll', 'RUNNING.md',
                              'SOURCE-COMPLIANCE.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.txt',
-                             'BETA-DISTRIBUTION-POLICY.md'):
+                             'BETA-DISTRIBUTION-POLICY.md', 'RUNTIME-DLLS.txt'):
                 self.assertIn('SnowboardKidsRecompiled/' + required, names)
             self.assertIn('Platform: windows', info)
             self.assertIn('Architecture: x86_64', info)
             self.assertIn('Version: 0.9.0-dev', info)
+            self.assertIn('Package: public-beta', info)
+            self.assertIn('Runtime-DLLs: RUNTIME-DLLS.txt', info)
+            self.assertIn(f'sha256: {hashlib.sha256(sdl.read_bytes()).hexdigest()}', listed)
+            self.assertIn('[system] kernel32.dll', listed)
             self.assertEqual(audit(archive), [])
+            sums = (d / 'SHA256SUMS.txt').read_text()
+            self.assertEqual(sums, f'{hashlib.sha256(archive.read_bytes()).hexdigest()}  {archive.name}\n')
 
-    def _audit(self, entries):
+    def _audit(self, entries, manifest=True):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'a.zip'
             base = {'SnowboardKidsEngine.exe': b'MZ', 'BUILD-INFO.txt': b'x', 'RUNNING.md': b'x',
                     'THIRD_PARTY_NOTICES.md': b'x', 'LICENSE': b'x', 'SOURCE-COMPLIANCE.md': b'x'}
             base.update(entries)
+            if manifest:  # describe exactly the top-level DLLs, as the packager does
+                text = ''.join(f'[bundled] {n}\nsha256: {hashlib.sha256(data).hexdigest()}\n\n'
+                               for n, data in base.items() if '/' not in n and n.lower().endswith('.dll'))
+                base.setdefault('RUNTIME-DLLS.txt', text.encode())
             with zipfile.ZipFile(archive, 'w') as bundle:
                 for name, data in base.items():
                     bundle.writestr('SnowboardKidsRecompiled/' + name, data)
             return audit(archive)
 
     def test_audit_rejects_windows_prohibited_content(self):
-        self.assertEqual(self._audit({'SDL2.dll': b'MZ'}), [])
+        self.assertEqual(self._audit({'SDL2.dll': b'MZ', 'licenses/SDL2.txt': b'zlib'}), [])
         cases = {
             'unreviewed.dll': 'unreviewed runtime DLL',
             'plugins/SDL2.dll': 'unreviewed runtime DLL',
@@ -185,6 +214,150 @@ class WindowsArchiveTests(unittest.TestCase):
         self.assertTrue(any('personal absolute path' in e for e in errors), errors)
         errors = self._audit({'dump.bin': b'\x80\x37\x12\x40' + b'\0' * 64})
         self.assertTrue(any('ROM header' in e for e in errors), errors)
+
+
+class RedistributionGateTests(unittest.TestCase):
+    """DXC provenance and notices: the audit, the pins and the vendored texts."""
+
+    DXC_NOTICES = {name: [f'licenses/{n}.txt' for n in entry['notices']]
+                   for name, entry in dxc_redist.DLLS.items()}
+
+    def audit_with(self, entries, manifest=True):
+        return WindowsArchiveTests._audit(WindowsArchiveTests(), entries, manifest)
+
+    def test_audit_notice_table_matches_runtime_policy(self):
+        for name, entry in REDISTRIBUTABLES.items():
+            self.assertEqual(set(REQUIRED_NOTICES.get(name, ())), {n for n, _ in entry.licenses}, name)
+
+    def test_dxc_dlls_require_their_notices(self):
+        for dll, notices in self.DXC_NOTICES.items():
+            complete = {dll: b'MZ', **{n: b'text' for n in notices}}
+            self.assertEqual(self.audit_with(complete), [], dll)
+            for missing in notices:
+                entries = {k: v for k, v in complete.items() if k != missing}
+                errors = self.audit_with(entries)
+                self.assertTrue(any(f'{dll} bundled without {missing}' in e for e in errors), errors)
+
+    def test_runtime_manifest_must_match_archive(self):
+        entries = {'SDL2.dll': b'MZ sdl', 'licenses/SDL2.txt': b'zlib'}
+        self.assertIn('missing runtime DLL manifest (RUNTIME-DLLS.txt)',
+                      self.audit_with(entries, manifest=False))
+        wrong = b'[bundled] SDL2.dll\nsha256: ' + b'0' * 64 + b'\n'
+        errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': wrong})
+        self.assertTrue(any('does not match the archived file' in e for e in errors), errors)
+        extra = b'[bundled] dxil.dll\nsha256: 00\n\n[bundled] SDL2.dll\nsha256: ' + \
+            hashlib.sha256(b'MZ sdl').hexdigest().encode() + b'\n'
+        errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': extra})
+        self.assertEqual(errors, ['RUNTIME-DLLS.txt lists dxil.dll, which is not in the archive'])
+        missing = b'[system] kernel32.dll\n'
+        errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': missing})
+        self.assertIn('SDL2.dll is not described in RUNTIME-DLLS.txt', errors)
+
+    def test_manifest_is_deterministic_and_path_free(self):
+        with tempfile.TemporaryDirectory(prefix='Users ') as directory:
+            d = Path(directory)
+            sdl = d / 'SDL2.dll'
+            sdl.write_bytes(make_pe(['KERNEL32.dll']))
+            dxc = d / 'dxcompiler.dll'
+            dxc.write_bytes(make_pe(['KERNEL32.dll']))
+            resolution = RuntimeResolution({'dxcompiler.dll': dxc, 'SDL2.dll': sdl},
+                                           ['user32.dll', 'kernel32.dll'], [])
+            text = runtime_manifest(resolution)
+            self.assertEqual(text, runtime_manifest(RuntimeResolution(
+                {'SDL2.dll': sdl, 'dxcompiler.dll': dxc}, ['user32.dll', 'kernel32.dll'], [])))
+            self.assertNotIn(str(d), text)
+            self.assertNotIn('\\', text)
+            self.assertIn('version: 1.7.2308.7', text)
+            self.assertIn(dxc_redist.ARCHIVE_URL, text)
+            self.assertIn('licenses: licenses/DirectXShaderCompiler-LICENSE-LLVM.txt', text)
+            self.assertIn('evidence: text', text)
+
+    def test_vendored_license_texts_match_pins(self):
+        self.assertEqual(dxc_redist.verify_license_texts(ROOT), [])
+        # README: LICENSE-LLVM.txt applies to dxcompiler.dll, LICENSE-MS.txt to dxil.dll.
+        self.assertIn('LICENSE-LLVM.txt', dxc_redist.DLLS['dxcompiler.dll']['notices'].values())
+        self.assertEqual(list(dxc_redist.DLLS['dxil.dll']['notices'].values()), ['LICENSE-MS.txt'])
+
+    def test_missing_or_edited_license_text_blocks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            errors = dxc_redist.verify_license_texts(root)
+            self.assertEqual(len(errors), len(dxc_redist.LICENSE_TEXTS))
+            target = root / dxc_redist.LICENSE_DIR
+            target.mkdir(parents=True)
+            for name in dxc_redist.LICENSE_TEXTS:
+                (target / name).write_bytes((ROOT / dxc_redist.LICENSE_DIR / name).read_bytes())
+            self.assertEqual(dxc_redist.verify_license_texts(root), [])
+            (target / 'LICENSE-MS.txt').write_bytes(b'summarised terms')
+            self.assertEqual(len(dxc_redist.verify_license_texts(root)), 1)
+
+    def test_dxil_decision_must_be_explicitly_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.assertFalse(dxc_redist.dxil_redistribution_accepted(root))
+            record = root / dxc_redist.DXIL_DECISION
+            record.parent.mkdir(parents=True)
+            record.write_text('Decision: PENDING\nDecision: ACCEPTED is what it would say\n')
+            self.assertFalse(dxc_redist.dxil_redistribution_accepted(root))
+            for placeholder in ('Decision: ACCEPTED (<maintainer>, <YYYY-MM-DD>)\n',
+                                'Decision: ACCEPTED\n', 'Decision: ACCEPTED (maintainer)\n'):
+                record.write_text(placeholder)
+                self.assertFalse(dxc_redist.dxil_redistribution_accepted(root), placeholder)
+            record.write_text('Decision: ACCEPTED (maintainer, 2026-01-01)\n')
+            self.assertTrue(dxc_redist.dxil_redistribution_accepted(root))
+
+    def test_rt64_contrib_dxc_is_not_the_pinned_release(self):
+        # rt64/dxc-bin@cc15e715 ships an unsigned dxcompiler.dll matching no release.
+        contrib = ROOT / '.deps-renderer/rt64/src/contrib/dxc/bin/x64/dxcompiler.dll'
+        if not contrib.is_file():
+            self.skipTest('RT64 not bootstrapped')
+        from windows_runtime import sha256_file
+        self.assertNotEqual(sha256_file(contrib), dxc_redist.FILES['bin/x64/dxcompiler.dll'])
+        self.assertTrue(dxc_redist.verify_dll(contrib))
+
+    def test_cmake_copies_the_pinned_release(self):
+        cmake = (ROOT / 'CMakeLists.txt').read_text()
+        self.assertIn(f'.deps-renderer/dxc-redist/{dxc_redist.RELEASE_TAG}/bin/x64', cmake)
+        self.assertNotIn('src/contrib/dxc/bin/x64/dxcompiler.dll', cmake)
+
+    def test_installed_release_matches_pins_and_versions(self):
+        if dxc_redist.verify_install(ROOT):
+            self.skipTest('DXC release not bootstrapped (python scripts/bootstrap.py --only dxc)')
+        from windows_runtime import pe_file_version
+        for name, entry in dxc_redist.DLLS.items():
+            path = dxc_redist.dll_dir(ROOT) / name
+            self.assertEqual(dxc_redist.verify_dll(path), [])
+            self.assertEqual(pe_file_version(path), entry['version'])
+
+
+class ReadinessRuntimeTests(unittest.TestCase):
+    def archive(self, directory, entries):
+        path = Path(directory) / 'a.zip'
+        with zipfile.ZipFile(path, 'w') as bundle:
+            for name, data in {'SnowboardKidsEngine.exe': b'MZ', **entries}.items():
+                bundle.writestr('SnowboardKidsRecompiled/' + name, data)
+        return path
+
+    def test_windows_archive_dxc_gates(self):
+        from check_release_readiness import check_windows_runtime
+        with tempfile.TemporaryDirectory() as directory:
+            name, detail = check_windows_runtime(self.archive(directory, {}))
+            self.assertTrue(detail.startswith('ok:'), detail)
+            name, detail = check_windows_runtime(self.archive(directory, {'dxcompiler.dll': b'MZ unsigned'}))
+            self.assertEqual(name, 'windows_runtime_redistribution')
+            self.assertIn('dxcompiler.dll is not the pinned', detail)
+            name, detail = check_windows_runtime(self.archive(directory, {'dxil.dll': b'MZ'}))
+            self.assertIn('dxil.dll is not the pinned', detail)
+            if not dxc_redist.dxil_redistribution_accepted(ROOT):
+                self.assertIn('decision is not ACCEPTED', detail)
+
+    def test_linux_archive_is_not_checked(self):
+        from check_release_readiness import check_windows_runtime
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'l.zip'
+            with zipfile.ZipFile(path, 'w') as bundle:
+                bundle.writestr('SnowboardKidsRecompiled/SnowboardKidsEngine', b'ELF')
+            self.assertEqual(check_windows_runtime(path), (None, ''))
 
 
 class PackageScriptTests(unittest.TestCase):
@@ -208,11 +381,43 @@ class PackageScriptTests(unittest.TestCase):
             self.assertEqual(len(archives), 1)
             with zipfile.ZipFile(archives[0]) as bundle:
                 names = set(bundle.namelist())
+                info = bundle.read('SnowboardKidsRecompiled/BUILD-INFO.txt').decode()
+                listed = bundle.read('SnowboardKidsRecompiled/RUNTIME-DLLS.txt').decode()
             self.assertIn('SnowboardKidsRecompiled/SnowboardKidsEngine.exe', names)
             self.assertIn('SnowboardKidsRecompiled/SDL2.dll', names)
+            self.assertIn('SnowboardKidsRecompiled/licenses/SDL2.txt', names)
             self.assertNotIn('SnowboardKidsRecompiled/SnowboardKidsEngine.lib', names)
             self.assertFalse(any('/modules/' in n for n in names))
+            # A draft identifies itself inside the archive, not only by file name.
+            self.assertIn('Package: draft (not a release candidate; do not distribute)', info)
+            self.assertNotIn('public-beta', info)
+            self.assertIn('[bundled] SDL2.dll', listed)
+            self.assertNotIn(str(d), listed + info)
             self.assertEqual(audit(archives[0]), [])
+            sums = (out / 'SHA256SUMS.txt').read_text()
+            self.assertEqual(sums, f'{hashlib.sha256(archives[0].read_bytes()).hexdigest()}  {archives[0].name}\n')
+            self.assertIn('not release candidates', result.stdout)
+
+    def test_unpinned_dxc_is_refused_even_in_a_draft(self):
+        with tempfile.TemporaryDirectory() as directory:
+            d = Path(directory)
+            engine = d / 'SnowboardKidsEngine.exe'
+            engine.write_bytes(make_pe(['KERNEL32.dll', 'dxcompiler.dll']))
+            (d / 'dxcompiler.dll').write_bytes(make_pe(['KERNEL32.dll']))  # e.g. RT64's unsigned copy
+            (d / 'dxil.dll').write_bytes(make_pe(['KERNEL32.dll']))
+            result = subprocess.run([sys.executable, str(self.SCRIPT), '--engine', str(engine),
+                                     '--engine-only-draft', '--no-run', '--out-dir', str(d / 'o')],
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('is not the pinned Microsoft DirectXShaderCompiler v1.7.2308', result.stderr)
+            self.assertFalse(list((d / 'o').glob('*.zip')) if (d / 'o').exists() else [])
+
+    def test_draft_and_public_beta_are_exclusive(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'), '--binary', 'x',
+                                 '--assets', 'x', '--out', 'x.zip', '--draft', '--public-beta'],
+                                capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('mutually exclusive', result.stderr)
 
     def test_release_mode_requires_running_engine_and_module(self):
         with tempfile.TemporaryDirectory() as directory:
