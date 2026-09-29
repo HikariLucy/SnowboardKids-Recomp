@@ -17,8 +17,8 @@ whose upstream license is unstated.
 | RT64 | pinned `LICENSE` | MIT; notice bundled |
 | RecompFrontend | no top-level license in pinned tree | **PENDING** upstream clarification; explicitly disclosed |
 | SDL2 | system/runtime dependency; Windows `SDL2.dll` 2.26.3 from RT64's pinned `mupen64plus-win32-deps` | zlib terms; Windows packages ship `licenses/SDL2.txt` |
-| DirectX Shader Compiler `dxcompiler.dll` (Windows) | official Microsoft `v1.7.2308` release, SHA-256 pinned, Microsoft-signed; section 7 | LLVM/NCSA; `LICENSE-LLVM`, source `LICENSE.TXT` and `ThirdPartyNotices.txt` bundled |
-| DirectX Shader Compiler `dxil.dll` (Windows) | same release; section 7 | Microsoft distributable-code terms; **PENDING** maintainer decision (`docs/DXIL-REDISTRIBUTION.md`); public Windows packages refused |
+| DirectX Shader Compiler `dxcompiler.dll` (Windows) | official Microsoft `v1.8.2505.1` release, SHA-256 pinned, Microsoft-signed; section 7 | LLVM/NCSA; `LICENSE-LLVM`, source `LICENSE.TXT` and `ThirdPartyNotices.txt` bundled |
+| DirectX Shader Compiler `dxil.dll` (Windows) | not needed by the pinned release; section 7 | not shipped; the audit rejects it |
 | Microsoft Visual C++ runtime (Windows) | build machine `VCToolsRedistDir` | Visual Studio redistributable terms, app-local |
 | RmlUi | submodule `LICENSE.txt` | MIT |
 | {fmt} | submodule `LICENSE` | MIT |
@@ -127,17 +127,20 @@ license paths in the package's `RUNTIME-DLLS.txt`; Windows system DLLs are
 never bundled (`scripts/windows_runtime.py`).
 
 RT64's vendored `src/contrib/dxc` (`rt64/dxc-bin@cc15e715`, no license file)
-holds an official `dxil.dll` (`v1.7.2212`, byte-identical) but an unsigned
-development `dxcompiler.dll` (`1.7.0.4147`, DXC commit `0dc8d9060`) that matches
-no Microsoft release. Neither is shipped. Packages use both DLLs from the
-official `v1.7.2308` release archive, pinned by SHA-256 in
-`scripts/dxc_redist.py`, with the license texts the release README assigns to
-them vendored byte-exact in `licenses/DirectXShaderCompiler/`. Evidence and
-re-check commands: `docs/DXC-PROVENANCE.md`.
+holds an official `dxil.dll` (`v1.7.2212`) but an unsigned development
+`dxcompiler.dll` (`1.7.0.4147`, DXC commit `0dc8d9060`) that matches no
+Microsoft release; none of it is used on Windows. Builds and packages use the
+official `v1.8.2505.1` release, pinned by SHA-256 in `scripts/dxc_redist.py`:
+its `dxc.exe` compiles every shader at build time and its `dxcompiler.dll` is
+the only DXC file shipped, with the license texts the release notes assign to
+it vendored byte-exact in `licenses/DirectXShaderCompiler/`.
 
-`dxil.dll` is under Microsoft's proprietary distributable-code terms. Their
-distribution requirements are recorded for a maintainer decision in
-`docs/DXIL-REDISTRIBUTION.md`; this audit does not conclude on them.
+`dxil.dll`, DXC's separately licensed validator (Microsoft distributable-code
+terms), is not shipped: from DXC 1.8.2502 the compiler validates and hashes
+DXIL itself, and CI proves RT64's run-time path and D3D12 acceptance with no
+`dxil.dll` findable. The audit and readiness gate reject it. No decision about
+its terms was taken or is required (`docs/DXIL-REDISTRIBUTION.md`, historical).
+Evidence and re-check commands: `docs/DXC-PROVENANCE.md`.
 
 ## 8. Release decision
 

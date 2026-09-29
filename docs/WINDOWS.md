@@ -14,7 +14,7 @@ after a live gameplay validation of a packaged build (see
 | 1 | Windows renderer/runtime compiles | reached | `renderer-compile.yml` → `windows` job (RT64, RecompFrontend, N64ModernRuntime with clang-cl) |
 | 2 | `SnowboardKidsEngine.exe` builds and `--version` works | reached | `renderer-compile.yml` → `windows-engine` job (windows-2022, clang-cl 19): engine-only build, `--version` prints `Snowboard Kids Recompiled 0.9.0` + the HEAD commit, `dumpbin` shows the 62 exported runtime symbols; all 11 engine-only CTests pass |
 | 3 | `SnowboardKidsGame.dll` builds and passes ABI validation | mechanism proven, real DLL pending | `module_engine_probe` on Windows: a synthetic DLL built with the real builder code and module harness imports from `SnowboardKidsEngine.exe`, and the real engine loads, validates and initializes it (export binding checked); a DLL needing a symbol the engine lacks is refused (`LoadLibrary` error 127). The real-module path (module inputs bundle → `build-game-module.py --inputs`) is in place and produces an engine-validated module on Linux; a real DLL has not been built on Windows yet — see [Real Windows validation](#real-windows-validation-level-3--level-5) |
-| 4 | complete, audited Windows ZIP | infrastructure ready, artifact pending | public mode of `package-beta-windows.py` requires the engine built from HEAD, a real engine-validated `SnowboardKidsGame.dll`, reviewed assets, only reviewed runtime DLLs (DXC hash-pinned to the official Microsoft `v1.7.2308` release), their license texts, `RUNTIME-DLLS.txt`, the artifact audit and the readiness gate. CI builds the engine-only draft with the pinned DXC and checks its contents. Missing: a real module, and the maintainer decision on `dxil.dll` ([DXIL-REDISTRIBUTION.md](DXIL-REDISTRIBUTION.md)) |
+| 4 | complete, audited Windows ZIP | infrastructure ready, artifact pending | public mode of `package-beta-windows.py` requires the engine built from HEAD, a real engine-validated `SnowboardKidsGame.dll`, reviewed assets, only reviewed runtime DLLs (DXC hash-pinned to the official Microsoft `v1.8.2505.1` release, no `dxil.dll`), their license texts, `RUNTIME-DLLS.txt`, the artifact audit and the readiness gate. CI builds the engine-only draft with the pinned DXC and checks its contents. Missing: a real module and live validation |
 | 5 | live gameplay on real Windows | not started | requires a person with a Windows PC and their own ROM; [checklist](#checklist) |
 
 ## Architecture
@@ -80,16 +80,19 @@ build-engine\SnowboardKidsEngine.exe --version
 ctest --test-dir build-engine --output-on-failure
 ```
 
-The build copies `SDL2.dll` and the pinned release's `dxcompiler.dll` and `dxil.dll`
-beside the exe (configuration fails if `--only dxc` was not bootstrapped).
+The build compiles every RT64/RecompFrontend shader with the pinned release's
+`dxc.exe` and copies `SDL2.dll` and its `dxcompiler.dll` beside the exe; no
+`dxil.dll` is needed or copied (configuration fails if `--only dxc` was not
+bootstrapped). CTest `renderer_dxc_runtime` exercises RT64's run-time shader
+compile+link and D3D12 (WARP) acceptance ([DXC-PROVENANCE.md](DXC-PROVENANCE.md)).
 
 ### Runtime dependencies observed in CI (`dumpbin /dependents`)
 
 | DLL | Needed by | Handling |
 | --- | --- | --- |
 | `SDL2.dll` (2.26.3) | engine | bundled, `licenses/SDL2.txt` |
-| `dxcompiler.dll` 1.7.2308.7 | engine (RT64 links `dxcompiler.lib`) | bundled from the SHA-256-pinned official Microsoft release (`scripts/dxc_redist.py`), not RT64's unsigned contrib build; `licenses/DirectXShaderCompiler-LICENSE-LLVM.txt`, `-LICENSE.txt`, `-ThirdPartyNotices.txt` ([DXC-PROVENANCE.md](DXC-PROVENANCE.md)) |
-| `dxil.dll` 101.7.2308.12 | loaded by `dxcompiler.dll` | same release; `licenses/DirectXShaderCompiler-dxil-LICENSE-MS.txt`; shipped only after [the maintainer decision](DXIL-REDISTRIBUTION.md) |
+| `dxcompiler.dll` 1.8.2505.32 | engine (RT64 links `dxcompiler.lib`; compiles and links D3D12 shaders at run time) | bundled from the SHA-256-pinned official Microsoft `v1.8.2505.1` release (`scripts/dxc_redist.py`), not RT64's unsigned contrib build; `licenses/DirectXShaderCompiler-LICENSE-LLVM.txt`, `-LICENSE.txt`, `-ThirdPartyNotices.txt` ([DXC-PROVENANCE.md](DXC-PROVENANCE.md)) |
+| `dxil.dll` | nothing: this DXC signs shaders with its built-in validator | never shipped; staging, audit and readiness reject it. A `dxil.dll` a user has installed (e.g. a Windows SDK on `PATH`) may be loaded by `dxcompiler.dll` at startup and is harmless (tested) |
 | `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll` | engine, module, DXC | bundled app-local from `VCToolsRedistDir` |
 | `KERNEL32`, `USER32`, `GDI32`, `SHELL32`, `ole32`, `OLEAUT32`, `ADVAPI32`, `IMM32`, `SETUPAPI`, `VERSION`, `WINMM`, `msvcrt`, `d3d12`, `dxgi`, `D3DCOMPILER_47`, `api-ms-win-*` | engine, SDL2, DXC | Windows system DLLs, never bundled |
 
@@ -206,8 +209,6 @@ Builder exit codes: 1 wrong ROM / bundle from another ROM, 2 no clang-cl/MSVC or
 ### D. After the Level 5 checklist passes: public ZIP and clean-folder test
 
 Same prompt and checkout, clean tree, engine built from the current HEAD.
-The package refuses to build while `docs/DXIL-REDISTRIBUTION.md` still reads
-`Decision: PENDING` — that decision is yours (see that file).
 
 ```bat
 rem 7. public Windows package (every gate must pass; nothing is uploaded)
@@ -303,6 +304,9 @@ wevtutil qe Application /c:5 /rd:true /f:text /q:"*[System[Provider[@Name='Appli
 
 rem GPU / driver
 dxdiag /t %CD%\sbk-dxdiag.txt
+
+rem run-time shader compiler (RT64's D3D12 compile+link path, WARP checks)
+build-engine\dxc-probe\SnowboardKidsDxcRuntimeProbe.exe dxc-probe-out --control-load > dxc-probe.log 2>&1
 ```
 
 ### What to send back
@@ -313,7 +317,7 @@ dxdiag /t %CD%\sbk-dxdiag.txt
 | engine build | the first error block of `cmake --build build-engine`, `sbk-env.txt` |
 | module build (step 3) | `build-module.log` (rerun with `--keep-temp -j 1`), `sbk-env.txt` |
 | `--validate-module` (step 4) | its full output, both `dumpbin /dependents` outputs |
-| launch / gameplay (step 5) | `sbk-run.log`, `%APPDATA%\SnowboardKids\logs\*.log`, `sbk-crash.txt`, `sbk-dxdiag.txt`, which checklist row failed |
+| launch / gameplay (step 5) | `sbk-run.log`, `%APPDATA%\SnowboardKids\logs\*.log`, `sbk-crash.txt`, `sbk-dxdiag.txt`, `dxc-probe.log` (rendering problems), which checklist row failed |
 | package (step 7) | `package.log` |
 | ZIP run (steps 8–9) | `zip-run.log` / `zip-run-appdata.log`, the `dir` listing, `RUNTIME-DLLS.txt` from the ZIP |
 
@@ -331,7 +335,8 @@ Two modes of `scripts/package-beta-windows.py`, deliberately separate:
 | Engine | may skip running (`--no-run`) | must run and report the project version and HEAD |
 | Working tree | any | must be clean |
 | Runtime DLLs | from PE imports; DXC must be the pinned release bytes | same |
-| DLLs not cleared (`dxil.dll` while PENDING) | left out, with a warning | refused |
+| DLLs whose license text is not bootstrapped | left out, with a warning | refused |
+| `dxil.dll` | never (unreviewed import; audit rejects it) | never |
 | License texts, `RUNTIME-DLLS.txt`, audit | required | required |
 | Readiness gate | not run | required (`check_release_readiness.py --public-beta`) |
 | Identification | `...-engine-draft.zip`, `Package: draft (not a release candidate; do not distribute)` | `Package: public-beta` |
@@ -356,11 +361,11 @@ Layout:
 ```text
 SnowboardKidsRecompiled/
 ├── SnowboardKidsEngine.exe
-├── SDL2.dll, dxcompiler.dll, dxil.dll, VC++ runtime   (only DLLs the PE imports require)
+├── SDL2.dll, dxcompiler.dll, VC++ runtime   (only DLLs the PE imports require; no dxil.dll)
 ├── modules/snowboardkids-us/SnowboardKidsGame.dll
 ├── assets/
 ├── licenses/   (incl. DirectXShaderCompiler-LICENSE-LLVM/-LICENSE/-ThirdPartyNotices,
-│                DirectXShaderCompiler-dxil-LICENSE-MS, SDL2)
+│                SDL2)
 ├── scripts/    (optional local module builder)
 ├── RUNTIME-DLLS.txt   (per bundled DLL: SHA-256, version, provenance, license files)
 ├── LICENSE, SOURCE-COMPLIANCE.md, THIRD_PARTY_NOTICES.md
@@ -373,17 +378,13 @@ Controller Pak images, savestates, logs, `.pdb/.lib/.exp/.ilk`, DLLs outside
 the reviewed list, a bundled DLL without its license texts, a
 `RUNTIME-DLLS.txt` whose hashes differ from the archived DLLs, and personal
 paths such as `C:\Users\<name>`. The readiness gate additionally checks the
-DXC bytes against the pinned release and the `dxil.dll` decision.
+DXC bytes against the pinned release and rejects `dxil.dll`.
 
 ## Open items before a public Windows package
 
 1. **A real `SnowboardKidsGame.dll`** built on Windows with your ROM and
    validated by the engine (steps A–C).
 2. **Live validation** ([checklist](#checklist)).
-3. **`dxil.dll` redistribution decision** by the maintainer
-   ([DXIL-REDISTRIBUTION.md](DXIL-REDISTRIBUTION.md)). Provenance and license
-   texts for both DXC DLLs are resolved ([DXC-PROVENANCE.md](DXC-PROVENANCE.md));
-   what remains is accepting (or not) Microsoft's distributable-code terms.
-4. The engine is a console-subsystem executable, so a console window opens
+3. The engine is a console-subsystem executable, so a console window opens
    next to the game. Acceptable for a beta (logs stay visible); revisit before
    a stable release.

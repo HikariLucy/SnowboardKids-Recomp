@@ -1,21 +1,22 @@
-# dxil.dll redistribution decision
+# dxil.dll redistribution: historical record
 
-Decision: PENDING
+Decision: NOT TAKEN — superseded on 2026-09-29, no decision is needed
 
-This file records the project maintainer's decision about redistributing
-`dxil.dll` in public Windows packages. `scripts/package-beta-windows.py` and
-`scripts/check_release_readiness.py` refuse a public package that contains
-`dxil.dll` until the line above reads exactly:
+**`dxil.dll` is no longer shipped, extracted or needed.** Windows builds moved
+to Microsoft DXC `v1.8.2505.1`, whose `dxcompiler.dll` validates and hashes
+("signs") DXIL with its built-in validator. RT64's run-time compile+link path
+was shown in CI to work with no `dxil.dll` anywhere on the search path, and
+D3D12 (WARP) accepts the resulting shaders: [DXC-PROVENANCE.md](DXC-PROVENANCE.md).
+Packaging, the artifact audit and the readiness gate now reject any `dxil.dll`.
 
-```text
-Decision: ACCEPTED (<maintainer>, <YYYY-MM-DD>)
-```
+No maintainer decision about Microsoft's distributable-code terms was taken or
+is required, and nothing here states whether distributing `dxil.dll` would have
+been acceptable. The analysis below is kept as it was written while
+`v1.7.2308` was pinned, for the record.
 
-Only a maintainer may change it, after reading the terms below. This file is a
-record of a decision, not legal advice, and nothing in this repository asserts
-that the decision is legally sufficient.
+## Record (2026-09-29, while DXC v1.7.2308 was pinned)
 
-## What is being distributed
+### What would have been distributed
 
 `dxil.dll` 101.7.2308.12 (Microsoft-signed), from the official
 DirectXShaderCompiler `v1.7.2308` release archive, SHA-256
@@ -24,19 +25,22 @@ Provenance: [DXC-PROVENANCE.md](DXC-PROVENANCE.md).
 
 `dxcompiler.dll` loads it to validate and sign the DXIL shaders RT64 compiles
 at run time. Without it, DXC `v1.7.2308` emits unsigned DXIL, which D3D12
-rejects, so the D3D12 renderer depends on it (not yet observed on real
-hardware for this project: part of the Level 5 test).
+rejects, so the D3D12 renderer depended on it. (Later measured in CI: with a
+foreign `dxil.dll` on `PATH`, `v1.7.2308` also broke RT64's run-time link;
+see DXC-PROVENANCE.md.)
 
-## Which license applies
+### Which license applies
 
-The release archive's `README.md` states: "LICENSE-MS.txt — dxil.dll (if
-included in package)". That text is vendored byte-exact at
-[`licenses/DirectXShaderCompiler/LICENSE-MS.txt`](../licenses/DirectXShaderCompiler/LICENSE-MS.txt)
-and ships in the package as `licenses/DirectXShaderCompiler-dxil-LICENSE-MS.txt`.
+The `v1.7.2308` release archive's `README.md` states: "LICENSE-MS.txt — dxil.dll
+(if included in package)". That text (SHA-256
+`734f72f239fe7b07b4c7203f294c1a7ce27095687278bab7e56d630d7c672963`) was
+vendored and would have shipped as
+`licenses/DirectXShaderCompiler-dxil-LICENSE-MS.txt`; it was removed with the
+migration and is available in the official release archive.
 It is the *Microsoft Software License Terms — Microsoft DirectX Shader
 Compiler*, not an open-source license.
 
-## Terms the maintainer must review (quoted from LICENSE-MS.txt)
+### Terms the maintainer must review (quoted from LICENSE-MS.txt)
 
 > General. Subject to the terms of this agreement, you may install and use any
 > number of copies of the software, and solely for use on Windows.
@@ -66,7 +70,7 @@ Compiler*, not an open-source license.
 
 Read the full text before deciding; the excerpts are not a substitute.
 
-## Open questions the decision must answer
+### Open questions the decision must answer
 
 1. **Distributables file list.** The terms allow distributing software "listed
    in the distributables file list in the software". The `v1.7.2308` archive
@@ -85,7 +89,7 @@ Read the full text before deciding; the excerpts are not a substitute.
    the same archive is compatible with the GPL-3.0 and with the restriction
    above is a legal question this repository does not answer.
 
-## Alternatives if the decision is not ACCEPTED
+### Alternatives if the decision is not ACCEPTED
 
 - Ship no `dxil.dll` and document that D3D12 needs it (the renderer cannot sign
   shaders without it), e.g. by telling users to obtain the official release
@@ -93,5 +97,5 @@ Read the full text before deciding; the excerpts are not a substitute.
 - Ship only a Vulkan-capable configuration (the Windows engine currently
   creates a D3D12 window; this would need engineering work).
 
-Engine-only draft archives built in CI leave `dxil.dll` out while the decision
-is PENDING, because CI artifacts are downloadable.
+At the time, engine-only draft archives built in CI left `dxil.dll` out while
+the decision was pending, because CI artifacts are downloadable.
