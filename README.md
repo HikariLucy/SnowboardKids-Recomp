@@ -9,9 +9,9 @@ Powered by **N64Recomp**, **RT64**, **RecompFrontend**, and **N64ModernRuntime**
 [![ROM-free CI](https://github.com/HikariLucy/SnowboardKids-Recomp/actions/workflows/ci.yml/badge.svg)](https://github.com/HikariLucy/SnowboardKids-Recomp/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue.svg)](LICENSE)
 ![Linux](https://img.shields.io/badge/Linux-beta-success)
-![Windows](https://img.shields.io/badge/Windows-in%20progress-orange)
+![Windows](https://img.shields.io/badge/Windows-beta-success)
 
-**[Download v0.9.0-beta](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta)** ·
+**[Download v0.9.0-beta.1](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta.1)** ·
 [Quick Start](#quick-start) ·
 [Roadmap](docs/ROADMAP.md) ·
 [Running Guide](RUNNING.md) ·
@@ -34,8 +34,8 @@ This is **not an emulator distribution** and the repository does not provide the
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| **Linux x86_64** | ✅ Public beta | Live gameplay validated and downloadable as <code>v0.9.0-beta</code> |
-| **Windows x86_64** | 🚧 In progress | ROM-free engine and module-binding infrastructure validated in CI; real game-module and live gameplay validation pending. No Windows download yet — see [docs/WINDOWS.md](docs/WINDOWS.md) |
+| **Linux x86_64** | ✅ Public beta | Live gameplay validated; refreshed package included in <code>v0.9.0-beta.1</code> |
+| **Windows x86_64** | ✅ Public beta | Real game module, packaging and physical gameplay validated; included in <code>v0.9.0-beta.1</code> — see [docs/WINDOWS.md](docs/WINDOWS.md) |
 
 The Linux beta has been validated in real play sessions, including:
 
@@ -49,20 +49,17 @@ The Linux beta has been validated in real play sessions, including:
 - Master Volume and accessibility settings
 - Controller Pak persistence
 
-Windows x86_64 is **in development**. CI builds the ROM-free <code>SnowboardKidsEngine.exe</code> with clang-cl (RT64, RecompFrontend and N64ModernRuntime included) and verifies the engine ↔ game-module binding with a synthetic module. The real <code>SnowboardKidsGame.dll</code>, a complete Windows package and live Windows gameplay have **not** been validated yet, so there is no Windows release. Progress and developer build notes: [docs/WINDOWS.md](docs/WINDOWS.md).
+Windows x86_64 has completed the same release path: the ROM-free engine and renderer stack build in CI, a real <code>SnowboardKidsGame.dll</code> validates against the engine ABI, the audited package runs from a clean extracted directory, and physical gameplay has been verified with D3D12/RT64, audio, keyboard, controller, rumble, official save persistence and F5/F8 savestates. Engineering evidence and build notes: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Quick start
 
-### Linux beta
+### Public beta
 
-1. Download **[v0.9.0-beta](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta)**.
-2. Extract <code>SnowboardKidsRecompiled-0.9.0-beta-Linux-x86_64.zip</code>.
-3. Run:
-
-~~~bash
-./SnowboardKidsEngine
-~~~
-
+1. Download **[v0.9.0-beta.1](https://github.com/HikariLucy/SnowboardKids-Recomp/releases/tag/v0.9.0-beta.1)**.
+2. Extract the package for your platform:
+   - <code>SnowboardKidsRecompiled-0.9.0-beta.1-Linux-x86_64.zip</code>
+   - <code>SnowboardKidsRecompiled-0.9.0-beta.1-Windows-x86_64.zip</code>
+3. Run <code>./SnowboardKidsEngine</code> on Linux or <code>SnowboardKidsEngine.exe</code> on Windows.
 4. Select your own supported **Snowboard Kids (USA)** ROM when prompted.
 5. The engine validates the ROM and launches the bundled reviewed game module.
 
@@ -187,12 +184,13 @@ Savestates intentionally do **not** rewind Controller Pak storage. The original 
 - [x] Physical controller and rumble support
 - [x] Linux public beta packaging
 - [x] First public release: <code>v0.9.0-beta</code>
+- [x] Windows x86_64 real game-module (<code>SnowboardKidsGame.dll</code>) build and validation
+- [x] Windows x86_64 distributable packaging
+- [x] Live Windows gameplay validation
+- [x] Cross-platform beta refresh: <code>v0.9.0-beta.1</code>
 
 ### In progress
 
-- [ ] Windows x86_64: real game-module (<code>SnowboardKidsGame.dll</code>) build and validation
-- [ ] Windows x86_64 distributable build
-- [ ] Live Windows gameplay validation
 - [ ] Broader full-game QA
 
 ### Later
