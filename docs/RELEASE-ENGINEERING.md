@@ -195,7 +195,9 @@ Windows is **in development**, not supported. Hosted CI builds the ROM-free
 its `--version` against HEAD, lists its DLL dependencies, runs the synthetic
 module probe and uploads an engine-only draft archive. The Windows game module
 path and packaging (`scripts/package-beta-windows.py`) exist but a real
-`SnowboardKidsGame.dll` and a live gameplay test are still missing, and the
-DirectX Shader Compiler DLL license texts need review before a public Windows
+`SnowboardKidsGame.dll` and a live gameplay test are still missing. The DirectX
+Shader Compiler DLLs come from a SHA-256-pinned official Microsoft release with
+their license texts (`docs/DXC-PROVENANCE.md`); `dxil.dll` additionally needs
+the maintainer decision in `docs/DXIL-REDISTRIBUTION.md` before a public Windows
 package. See `docs/WINDOWS.md` for the level-by-level status and the live
 validation checklist. Do not label Windows as supported until that test passes.
