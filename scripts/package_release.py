@@ -25,7 +25,10 @@ def main():
     parser.add_argument('--binary', type=Path, required=True)
     parser.add_argument('--assets', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--library', type=Path, action='append', default=[])
+    parser.add_argument('--library', type=Path, action='append', default=[],
+                        help='Runtime shared library placed beside the executable')
+    parser.add_argument('--license', action='append', default=[], metavar='NAME=PATH',
+                        help='Extra license text shipped as licenses/NAME.txt (bundled runtime DLLs)')
     parser.add_argument('--game-module', type=Path,
                         help='Reviewed precompiled SnowboardKidsGame module to bundle under modules/snowboardkids-us')
     parser.add_argument('--public-beta', action='store_true',
@@ -123,6 +126,11 @@ def main():
         ('Fredoka', ROOT / 'licenses/Fredoka-OFL.txt'),
         ('NotoEmoji', ROOT / 'licenses/NotoEmoji-OFL.txt'),
     ]
+    for spec in args.license:
+        name, sep, source = spec.partition('=')
+        if not sep or not name or not Path(source).is_file():
+            parser.error(f'invalid --license {spec!r}: expected NAME=existing-file')
+        license_candidates.append((name, Path(source)))
     for name, source in license_candidates:
         if source.is_file():
             files.append((f'licenses/{name}.txt', source.read_bytes(), False))
