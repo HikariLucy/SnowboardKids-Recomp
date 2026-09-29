@@ -31,3 +31,16 @@ index 534776f..affd2b1 100644
  elseif (APPLE)
      if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
          # find zlib and include in dyld path
+diff --git a/src/common/rt64_dynamic_libraries.cpp b/src/common/rt64_dynamic_libraries.cpp
+index 56b2b04..b7d890d 100644
+--- a/src/common/rt64_dynamic_libraries.cpp
++++ b/src/common/rt64_dynamic_libraries.cpp
+@@ -16,7 +16,7 @@ namespace RT64 {
+     typedef std::pair<std::string, bool> NameRequiredPair;
+     
+     const auto DynamicLibraryList = {
+-        NameRequiredPair("dxil.dll", true),
++        NameRequiredPair("dxil.dll", false),
+         NameRequiredPair("dxcompiler.dll", true),
+ #   if DLSS_ENABLED
+         NameRequiredPair("nvngx_dlssd.dll", false),

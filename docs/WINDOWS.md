@@ -12,10 +12,10 @@ after a live gameplay validation of a packaged build (see
 | Level | Meaning | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | Windows renderer/runtime compiles | reached | `renderer-compile.yml` → `windows` job (RT64, RecompFrontend, N64ModernRuntime with clang-cl) |
-| 2 | `SnowboardKidsEngine.exe` builds and `--version` works | reached | `renderer-compile.yml` → `windows-engine` job (windows-2022, clang-cl 19): engine-only build, `--version` prints `Snowboard Kids Recompiled 0.9.0` + the HEAD commit, `dumpbin` shows the 62 exported runtime symbols; all 11 engine-only CTests pass |
-| 3 | `SnowboardKidsGame.dll` builds and passes ABI validation | mechanism proven, real DLL pending | `module_engine_probe` on Windows: a synthetic DLL built with the real builder code and module harness imports from `SnowboardKidsEngine.exe`, and the real engine loads, validates and initializes it (export binding checked); a DLL needing a symbol the engine lacks is refused (`LoadLibrary` error 127). The real-module path (module inputs bundle → `build-game-module.py --inputs`) is in place and produces an engine-validated module on Linux; a real DLL has not been built on Windows yet — see [Real Windows validation](#real-windows-validation-level-3--level-5) |
-| 4 | complete, audited Windows ZIP | infrastructure ready, artifact pending | public mode of `package-beta-windows.py` requires the engine built from HEAD, a real engine-validated `SnowboardKidsGame.dll`, reviewed assets, only reviewed runtime DLLs (DXC hash-pinned to the official Microsoft `v1.8.2505.1` release, no `dxil.dll`), their license texts, `RUNTIME-DLLS.txt`, the artifact audit and the readiness gate. CI builds the engine-only draft with the pinned DXC and checks its contents. Missing: a real module and live validation |
-| 5 | live gameplay on real Windows | not started | requires a person with a Windows PC and their own ROM; [checklist](#checklist) |
+| 2 | `SnowboardKidsEngine.exe` builds and `--version` works | reached | `renderer-compile.yml` → `windows-engine` job (windows-2022, clang-cl 19): engine-only build, `--version` prints `Snowboard Kids Recompiled 0.9.0` + the HEAD commit, `dumpbin` shows the 62 exported runtime symbols; all 12 engine-only CTests pass (also 12/12 on a physical Windows PC, native clang-cl build) |
+| 3 | `SnowboardKidsGame.dll` builds and passes ABI validation | reached | `module_engine_probe` on Windows: a synthetic DLL built with the real builder code and module harness imports from `SnowboardKidsEngine.exe`, and the real engine loads, validates and initializes it (export binding checked); a DLL needing a symbol the engine lacks is refused (`LoadLibrary` error 127). The real-module path (module inputs bundle → `build-game-module.py --inputs`) is in place and produces an engine-validated module on Linux; a real `SnowboardKidsGame.dll` was built on physical Windows from a legitimate ROM + private bundle and passes `--validate-module` (`MODULE_VALID: corpus=0x76260CB8F0E080D7 funcs=1981 hle=56`); see [Verified on physical Windows](#verified-on-physical-windows) |
+| 4 | complete, audited Windows ZIP | infrastructure ready, artifact pending | public mode of `package-beta-windows.py` requires the engine built from HEAD, a real engine-validated `SnowboardKidsGame.dll`, reviewed assets, only reviewed runtime DLLs (DXC hash-pinned to the official Microsoft `v1.8.2505.1` release, no `dxil.dll`), their license texts, `RUNTIME-DLLS.txt`, the artifact audit and the readiness gate. CI builds the engine-only draft with the pinned DXC and checks its contents. Missing: building the public ZIP from a clean tree and running it from a clean folder |
+| 5 | live gameplay on real Windows | partially verified | real gameplay on a physical PC (title, playable race, audio, keyboard, controller, F5/F8, official save); rumble, save persistence across restart, the ROM selector and the public ZIP are not verified yet; [checklist](#checklist) |
 
 ## Architecture
 
@@ -129,7 +129,7 @@ module's `init()` and the PE import binding); there is no weaker fallback.
 
 The same bundle built on Linux produces a module that the Linux engine validates
 with the reviewed corpus digest `0x76260CB8F0E080D7` (1981 functions, 56 HLE).
-**It has not been compiled on Windows yet** — that is the next step (Level 3).
+The same module was then compiled natively on Windows and reports the same digest (see [Verified on physical Windows](#verified-on-physical-windows)).
 
 ## Real Windows validation (Level 3 → Level 5)
 
@@ -246,6 +246,30 @@ rmdir /s /q "%APPDATA%\SnowboardKids"
 move "%APPDATA%\SnowboardKids.dev-backup" "%APPDATA%\SnowboardKids"
 ```
 
+### Verified on physical Windows
+
+Results from a physical Windows PC (AMD Radeon Vega 8), with a legitimate ROM
+and a private module inputs bundle, `--rom` given explicitly:
+
+- `SnowboardKidsEngine.exe` compiled natively with clang-cl.
+- `--version` correct for commit `3862ee3dbec5`.
+- 12/12 CTests PASS.
+- A real `SnowboardKidsGame.dll` built from the legitimate ROM + private bundle;
+  `MODULE_VALID: corpus=0x76260CB8F0E080D7 funcs=1981 hle=56`.
+- The first start found a bug: RT64 required `dxil.dll` at start-up. Making it
+  optional (`NameRequiredPair("dxil.dll", false)`, in
+  `patches/rt64-dxc-executable.patch`) let the game start with the pinned
+  Microsoft DXC and no `dxil.dll`; CI now guards the patched line.
+- D3D12/RT64 renders on the AMD Radeon Vega 8; ROM validation Good; correct
+  title and game; a playable race; audio, keyboard and physical controller OK.
+- F5 quick-save and F8 quick-load OK; close and reopen OK.
+- An official in-game save was made; data lives in `%APPDATA%\SnowboardKids`
+  and the Controller Pak `port1.mpk` was created.
+
+Not verified yet: rumble; that the official save persists after closing and
+reopening; the public ZIP run from a clean folder; the ROM selector (the run
+used `--rom`).
+
 ### Checklist
 
 Record each result (OK / FAIL + log) in the PR or an issue. Levels 3–5 are
@@ -253,28 +277,29 @@ claimed only from these results; nothing here is inferred from CI.
 
 | # | Check | Level |
 | --- | --- | --- |
-| [ ] | `SnowboardKidsEngine.exe --version` prints `0.9.0` and the checkout commit | 2 |
-| [ ] | `build-game-module.py --inputs` → `BUILD SUCCESS!`, `Validation: engine` | 3 |
-| [ ] | `--validate-module` prints `MODULE_VALID` (corpus `0x76260CB8F0E080D7`) | 3 |
-| [ ] | `SnowboardKidsGame.dll` loads (`[MODULE] Loaded game module from: ...`) | 3 |
+| [x] | `SnowboardKidsEngine.exe --version` prints `0.9.0` and the checkout commit | 2 |
+| [x] | `build-game-module.py --inputs` → `BUILD SUCCESS!`, `Validation: engine` | 3 |
+| [x] | `--validate-module` prints `MODULE_VALID` (corpus `0x76260CB8F0E080D7`) | 3 |
+| [x] | `SnowboardKidsGame.dll` loads (`[MODULE] Loaded game module from: ...`) | 3 |
 | [ ] | ROM selector opens | 5 |
-| [ ] | your ROM validates | 5 |
-| [ ] | title screen reached | 5 |
-| [ ] | a race starts | 5 |
-| [ ] | D3D12 rendering works (no corruption, correct aspect) | 5 |
-| [ ] | audio works | 5 |
-| [ ] | keyboard works | 5 |
-| [ ] | physical controller works | 5 |
+| [x] | your ROM validates | 5 |
+| [x] | title screen reached | 5 |
+| [x] | a race starts | 5 |
+| [x] | D3D12 rendering works without observed corruption | 5 |
+| [x] | audio works | 5 |
+| [x] | keyboard works | 5 |
+| [x] | physical controller works | 5 |
 | [ ] | rumble works | 5 |
-| [ ] | F5 quick-save works | 5 |
-| [ ] | F8 quick-load works | 5 |
-| [ ] | native in-game save persists | 5 |
-| [ ] | close and reopen works; settings and progress restored | 5 |
-| [ ] | user data is in `%APPDATA%\SnowboardKids` (nothing written beside the exe) | 5 |
+| [x] | F5 quick-save works | 5 |
+| [x] | F8 quick-load works | 5 |
+| [ ] | native in-game save persists after close and reopen (the save was made; persistence not yet checked) | 5 |
+| [~] | close and reopen works (verified); settings and progress restored (only the F5/F8 part verified) | 5 |
+| [x] | runtime user data observed in `%APPDATA%\SnowboardKids` | 5 |
 | [ ] | a packaged ZIP runs from a fresh folder with no development checkout | 4/5 |
 
-The last row needs the Level 4 package (below), which is still blocked on the
-DXC license texts.
+`[x]` = verified on physical Windows, `[~]` = partly, `[ ]` = not verified.
+The ZIP row needs the public Level 4 package (below), built and run from a
+clean folder.
 
 ### If something fails: capture logs
 
@@ -382,9 +407,12 @@ DXC bytes against the pinned release and rejects `dxil.dll`.
 
 ## Open items before a public Windows package
 
-1. **A real `SnowboardKidsGame.dll`** built on Windows with your ROM and
-   validated by the engine (steps A–C).
-2. **Live validation** ([checklist](#checklist)).
-3. The engine is a console-subsystem executable, so a console window opens
+1. **Official save persistence**: close and reopen the game and confirm the
+   in-game save loads.
+2. **Rumble** on a physical controller.
+3. **ROM selector**: run without `--rom` and go through the selector.
+4. **Public ZIP**: build it from a clean tree, run it from a clean folder (steps
+   7–9), with and without `SBK_USER_DATA_DIR`.
+5. The engine is a console-subsystem executable, so a console window opens
    next to the game. Acceptable for a beta (logs stay visible); revisit before
    a stable release.

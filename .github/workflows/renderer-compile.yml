@@ -72,6 +72,12 @@ jobs:
         uses: ilammy/msvc-dev-cmd@v1
       - name: Bootstrap pinned dependencies, canonical patches and the DXC release
         run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme --only dxc
+      - name: RT64 must not require dxil.dll at start-up
+        shell: pwsh
+        run: |
+          $src = Get-Content .deps-renderer/rt64/src/common/rt64_dynamic_libraries.cpp -Raw
+          if ($src -match 'NameRequiredPair\("dxil\.dll",\s*true\)') { throw "RT64 requires dxil.dll: the pinned DXC signs shaders itself" }
+          if ($src -notmatch 'NameRequiredPair\("dxil\.dll",\s*false\)') { throw "RT64 no longer lists dxil.dll as optional" }
       - name: Configure ROM-free engine (clang-cl, engine-only)
         run: >-
           cmake -S . -B build-engine -G Ninja -DCMAKE_BUILD_TYPE=Release
