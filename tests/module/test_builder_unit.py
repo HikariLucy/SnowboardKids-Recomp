@@ -303,10 +303,11 @@ class ModuleInputsBundleTests(unittest.TestCase):
     def make_sources(self, root: Path):
         corpus = root / "corpus"
         corpus.mkdir()
+        # Bytes, not text: write_text would turn \n into \r\n on Windows.
         for i in range(40):
-            (corpus / f"funcs_{i}.c").write_text(f"// unit {i}\n")
+            (corpus / f"funcs_{i}.c").write_bytes(f"// unit {i}\n".encode())
         for name in ("lookup.cpp", "funcs.h", "recomp_overlays.inl"):
-            (corpus / name).write_text(f"// {name}\n")
+            (corpus / name).write_bytes(f"// {name}\n".encode())
         (corpus / "notes.txt").write_text("not a source")  # never bundled
         rsp = root / "aspMain.cpp"
         rsp.write_bytes(b"// rsp\r\n")  # line endings must survive byte-exact
