@@ -1,8 +1,8 @@
 # Public beta distribution policy
 
-Updated: 2026-09-28
+Updated: 2026-09-29
 
-Snowboard Kids Recompiled `v0.9.0-beta` is an unofficial, noncommercial public
+Snowboard Kids Recompiled `v0.9.0-beta.1` is an unofficial, noncommercial public
 beta intended for preservation, interoperability and testing.
 
 ## What the release contains
