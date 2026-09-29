@@ -217,5 +217,82 @@ class AtomicInstallTests(unittest.TestCase):
             self.assertEqual(active_module.read_text(), "ACTIVE_VERSION_2")
 
 
+class WindowsModuleBuildTests(unittest.TestCase):
+    """PE/COFF module build: compile/link flags, engine import library, sources."""
+
+    def test_msvc_like_compiles_corpus_as_cxx(self):
+        for flavor in (ToolchainFlavor.MSVC, ToolchainFlavor.CLANG_CL):
+            tc = Toolchain(Path("C:\\LLVM\\bin\\clang-cl.exe"), flavor)
+            cmd = tc.get_compile_command(Path("C:\\c\\funcs_0.c"), Path("C:\\o\\funcs_0.obj"), [],
+                                         ["dmem=(*sbk_module_dmem)"])
+            self.assertIn("/TP", cmd)  # generated .c units hold C++ continuation code
+            self.assertIn("/MD", cmd)  # same dynamic CRT as the engine
+            self.assertIn("/Ddmem=(*sbk_module_dmem)", cmd)
+        clang_cl = Toolchain(Path("C:\\LLVM\\bin\\clang-cl.exe"), ToolchainFlavor.CLANG_CL)
+        cmd = clang_cl.get_compile_command(Path("a.cpp"), Path("a.obj"), [])
+        self.assertIn("/clang:-msse4.1", cmd)
+
+    def test_prefix_maps_match_each_compiler(self):
+        old, new = Path("C:\\Users\\Player\\sbk"), Path(".")
+        self.assertEqual(Toolchain(Path("cl.exe"), ToolchainFlavor.MSVC).get_prefix_map_args(old, new),
+                         [f"/pathmap:{old}={new}"])
+        # clang-cl has no /pathmap and would treat it as an input file name.
+        self.assertEqual(Toolchain(Path("clang-cl.exe"), ToolchainFlavor.CLANG_CL).get_prefix_map_args(old, new),
+                         [f"/clang:-ffile-prefix-map={old}={new}"])
+        self.assertEqual(Toolchain(Path("clang++"), ToolchainFlavor.CLANG).get_prefix_map_args(old, new),
+                         [f"-ffile-prefix-map={old}={new}"])
+
+    def test_link_includes_engine_import_library(self):
+        tc = Toolchain(Path("C:\\LLVM\\bin\\clang-cl.exe"), ToolchainFlavor.CLANG_CL)
+        lib = Path("C:\\w\\SnowboardKidsEngine.lib")
+        cmd = tc.get_link_command([Path("C:\\w\\b.obj"), Path("C:\\w\\a.obj")],
+                                  Path("C:\\out\\SnowboardKidsGame.dll"), [lib])
+        self.assertEqual(cmd[-1], str(lib))
+        self.assertIn("/LD", cmd)
+        imp = tc.get_import_library_command(Path("C:\\w\\e.def"), lib, librarian=Path("C:\\LLVM\\bin\\llvm-lib.exe"))
+        self.assertEqual(imp, ["C:\\LLVM\\bin\\llvm-lib.exe", "/nologo", "/machine:x64",
+                               "/def:C:\\w\\e.def", f"/out:{lib}"])
+
+    def test_engine_export_list_and_import_definition(self):
+        from module_builder.engine_exports import import_definition_text, read_engine_exports
+        symbols = read_engine_exports(ROOT)
+        self.assertIn("osSendMesg_recomp", symbols)
+        self.assertIn("sbk_engine_register_overlays", symbols)
+        self.assertEqual(len(symbols), len(set(symbols)))
+        text = import_definition_text(symbols)
+        self.assertTrue(text.startswith("NAME SnowboardKidsEngine.exe\nEXPORTS\n"))
+        # The CMake .def regex and this parser accept exactly the same lines.
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        self.assertIn('REGEX "^SBK_ENGINE_EXPORT(_C)?\\\\(")', cmake)
+
+    def test_every_audited_hle_used_by_module_is_exported(self):
+        # The Linux module's undefined runtime symbols are the reviewed export
+        # surface; when a local module exists, prove the list still covers it.
+        from module_builder.engine_exports import read_engine_exports
+        import shutil
+        import subprocess
+        module = Path.home() / ".local/share/SnowboardKids/modules/snowboardkids-us/SnowboardKidsGame.so"
+        nm = shutil.which("nm")
+        if not module.is_file() or not nm:
+            self.skipTest("no local Linux game module to compare")
+        out = subprocess.run([nm, "-D", "--undefined-only", str(module)], capture_output=True, text=True).stdout
+        needed = {line.split()[-1] for line in out.splitlines() if line.split()[-1].endswith("_recomp")}
+        self.assertLessEqual(needed, set(read_engine_exports(ROOT)))
+
+    def test_windows_sources_add_dllimport_table(self):
+        from module_builder.generator import collect_module_sources
+        with tempfile.TemporaryDirectory() as td:
+            corpus = Path(td)
+            (corpus / "lookup.cpp").write_text("")
+            for i in range(40):
+                (corpus / f"funcs_{i}.c").write_text("")
+            rsp = corpus / "aspMain.cpp"
+            linux, _ = collect_module_sources(ROOT, corpus, rsp)
+            windows, _ = collect_module_sources(ROOT, corpus, rsp, windows=True)
+            imports = ROOT / "src" / "module" / "engine_imports_win32.cpp"
+            self.assertNotIn(imports, linux)
+            self.assertEqual(windows, linux + [imports])
+
+
 if __name__ == "__main__":
     unittest.main()

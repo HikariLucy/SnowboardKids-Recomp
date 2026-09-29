@@ -104,9 +104,11 @@ def find_corpus_dir(root: Path) -> Path:
     )
 
 
-def collect_module_sources(root: Path, corpus_dir: Path, rsp_cpp: Path) -> Tuple[List[Path], List[Path]]:
+def collect_module_sources(root: Path, corpus_dir: Path, rsp_cpp: Path,
+                           windows: bool = False) -> Tuple[List[Path], List[Path]]:
     """
     Collects all 43 translation units and include directories needed for compilation.
+    Windows modules add the dllimport address table (engine_imports_win32.cpp).
     Returns:
         (sources, include_dirs)
     """
@@ -125,6 +127,11 @@ def collect_module_sources(root: Path, corpus_dir: Path, rsp_cpp: Path) -> Tuple
         )
 
     sources = [entry_cpp, rsp_cpp, lookup_cpp] + funcs
+    if windows:
+        imports_cpp = root / "src" / "module" / "engine_imports_win32.cpp"
+        if not imports_cpp.is_file():
+            raise GeneratorError(f"Windows engine import table not found: {imports_cpp}")
+        sources.append(imports_cpp)
 
     runtime_dir = root / ".deps-runtime" / "N64ModernRuntime"
     if not runtime_dir.is_dir():

@@ -10,9 +10,12 @@ import time
 from typing import Callable, Dict, Optional, Any
 
 from .compiler import compile_sources_to_shared_library
+from .engine_exports import WINDOWS_RSP_DEFINES, import_definition_text, read_engine_exports
 from .errors import (
     BuilderError,
     BuilderExitCode,
+    LinkError,
+    MissingCompilerError,
     StoragePermissionError,
 )
 from .generator import collect_module_sources, find_corpus_dir, generate_rsp_code
@@ -20,6 +23,7 @@ from .manifest import generate_manifest_data, write_manifest_file
 from .rom import validate_rom
 from .toolchain import Toolchain, discover_toolchain
 from .validator import validate_module_binary
+import subprocess
 
 
 @dataclass
@@ -69,6 +73,19 @@ def default_user_module_dir(root_dir: Path) -> Path:
         return Path(xdg_data) / "SnowboardKids" / "modules" / "snowboardkids-us"
 
 
+def build_engine_import_library(toolchain: Toolchain, root_dir: Path, work_dir: Path) -> Path:
+    """Import library binding SnowboardKidsGame.dll to SnowboardKidsEngine.exe's exports."""
+    work_dir.mkdir(parents=True, exist_ok=True)
+    def_file = work_dir / "SnowboardKidsEngine.def"
+    out_lib = work_dir / "SnowboardKidsEngine.lib"
+    def_file.write_text(import_definition_text(read_engine_exports(root_dir)), encoding="ascii")
+    cmd = toolchain.get_import_library_command(def_file, out_lib)
+    res = subprocess.run(cmd, capture_output=True, text=True)
+    if res.returncode != 0 or not out_lib.is_file():
+        raise LinkError(f"Creating the engine import library failed:\n{res.stderr}\n{res.stdout}")
+    return out_lib
+
+
 class ModuleBuilderService:
     def __init__(self, config: BuilderConfig):
         self.config = config
@@ -92,6 +109,12 @@ class ModuleBuilderService:
         # 2. Discover Toolchain
         notify("Discovering C++ toolchain", 2, 6)
         toolchain = discover_toolchain(self.config.cxx)
+        windows = sys.platform == "win32"
+        if windows and not toolchain.is_msvc_like():
+            raise MissingCompilerError(
+                f"{toolchain.executable} cannot build SnowboardKidsGame.dll: the module must share the "
+                "engine's MSVC ABI. Install LLVM (clang-cl) or Visual Studio Build Tools."
+            )
 
         # Determine target output paths
         if self.config.explicit_out_file:
@@ -124,7 +147,14 @@ class ModuleBuilderService:
             rsp_cpp = generate_rsp_code(self.root_dir, rom_bytes, rsp_dir)
 
             # 4. Gather CPU translation units
-            sources, include_dirs = collect_module_sources(self.root_dir, corpus_dir, rsp_cpp)
+            sources, include_dirs = collect_module_sources(self.root_dir, corpus_dir, rsp_cpp,
+                                                           windows=windows)
+            source_defines = {}
+            link_libraries = []
+            if windows:
+                source_defines[rsp_cpp] = WINDOWS_RSP_DEFINES
+                link_libraries.append(build_engine_import_library(
+                    toolchain, self.root_dir, tmp_workspace / "engine-import"))
 
             # 5. Compile sources into temporary library
             notify(f"Compiling game module ({len(sources)} translation units)", 5, 6)
@@ -141,12 +171,14 @@ class ModuleBuilderService:
                 workspace_dir=tmp_workspace / "obj",
                 jobs=self.config.jobs,
                 progress_callback=comp_progress,
-                source_root=self.root_dir
+                source_root=self.root_dir,
+                source_defines=source_defines,
+                link_libraries=link_libraries
             )
 
             # 6. Validate ABI
             notify("Validating module ABI and exported symbols", 6, 6)
-            metadata = validate_module_binary(temp_out_library)
+            metadata = validate_module_binary(temp_out_library, self.root_dir)
 
             # Generate manifest
             manifest_data = generate_manifest_data(metadata, rom_sha1)

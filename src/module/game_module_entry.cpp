@@ -37,6 +37,41 @@ extern RspExitReason aspMain(uint8_t* rdram, uint32_t ucode_addr);
 __attribute__((weak)) uint8_t dmem[0x1000];
 #endif
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
+
+#include "engine_imports_win32.hpp"
+
+// A DLL cannot interpose the engine's RSP DMEM the way an ELF module does.
+// The RSP microcode translation unit is compiled with dmem=(*sbk_module_dmem),
+// so librecomp's RSP accessors read the engine buffer handed over in init().
+uint8_t (*sbk_module_dmem)[] = nullptr;
+
+extern "C" void sbk_engine_register_overlays(
+    const recomp::overlays::overlay_section_table_data_t* sections,
+    const recomp::overlays::overlays_by_index_t* overlays);
+
+extern "C" {
+#define SBK_ENGINE_EXPORT(name) void name(uint8_t* rdram, recomp_context* ctx);
+#define SBK_ENGINE_EXPORT_C(name)
+#include "engine_exports.inc"
+#undef SBK_ENGINE_EXPORT
+#undef SBK_ENGINE_EXPORT_C
+}
+
+// Addresses as this DLL sees them without dllimport: its own import thunks.
+static recomp_func_t* const module_import_thunks[] = {
+#define SBK_ENGINE_EXPORT(name) &name,
+#define SBK_ENGINE_EXPORT_C(name)
+#include "engine_exports.inc"
+#undef SBK_ENGINE_EXPORT
+#undef SBK_ENGINE_EXPORT_C
+};
+#endif
+
 namespace sbk::continuation {
 
 static void (*g_engine_enter)(uint64_t, uint8_t*, recomp_context*) = nullptr;
@@ -104,9 +139,54 @@ static void module_register_overlays(void) {
         .len = array_count(overlay_sections_by_index),
     };
 
+#if defined(_WIN32)
+    sbk_engine_register_overlays(&sections, &overlays);
+#else
     recomp::overlays::register_overlays(sections, overlays);
 #endif
+#endif
 }
+
+#if defined(_WIN32)
+// Verifies the engine export surface and points the function tables at the
+// engine's runtime functions, so HLE token identity matches the ELF build.
+static bool bind_engine_imports(const SbkEngineApiV1* engine) {
+    if (!engine || !engine->dmem) {
+        std::fprintf(stderr, "Engine did not provide RSP DMEM to the game module\n");
+        return false;
+    }
+    sbk_module_dmem = reinterpret_cast<uint8_t (*)[]>(engine->dmem);
+
+    using sbk::module_win32::engine_imports;
+    if (array_count(module_import_thunks) != sbk::module_win32::engine_import_count) {
+        std::fprintf(stderr, "Game module import tables disagree\n");
+        return false;
+    }
+    HMODULE engine_exe = GetModuleHandleW(nullptr);
+    for (size_t i = 0; i < sbk::module_win32::engine_import_count; ++i) {
+        const auto exported = reinterpret_cast<recomp_func_t*>(GetProcAddress(engine_exe, engine_imports[i].name));
+        if (!exported || exported != engine_imports[i].engine_address) {
+            std::fprintf(stderr, "Engine executable does not export %s to the game module\n",
+                         engine_imports[i].name);
+            return false;
+        }
+    }
+
+#if defined(SBK_HAS_RECOMP_OVERLAYS)
+    for (auto& section : section_table) {
+        for (size_t f = 0; f < section.num_funcs; ++f) {
+            for (size_t i = 0; i < sbk::module_win32::engine_import_count; ++i) {
+                if (section.funcs[f].func == module_import_thunks[i]) {
+                    section.funcs[f].func = engine_imports[i].engine_address;
+                    break;
+                }
+            }
+        }
+    }
+#endif
+    return true;
+}
+#endif
 
 static SbkRspUcodeFunc module_get_rsp_microcode(const OSTask* task) {
     if (task && task->t.type == M_AUDTASK) {
@@ -116,6 +196,11 @@ static SbkRspUcodeFunc module_get_rsp_microcode(const OSTask* task) {
 }
 
 static int module_init(const SbkEngineApiV1* engine) {
+#if defined(_WIN32)
+    if (!bind_engine_imports(engine)) {
+        return 1;
+    }
+#endif
     g_engine = engine;
     if (engine) {
         if (engine->switch_error) {
