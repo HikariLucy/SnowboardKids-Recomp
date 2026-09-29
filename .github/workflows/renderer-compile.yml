@@ -23,8 +23,8 @@ jobs:
         run: choco install ninja
       - name: Configure Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Bootstrap pinned dependencies and canonical patches
-        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme
+      - name: Bootstrap pinned dependencies, canonical patches and the DXC release
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme --only dxc
       - name: Configure renderer stack (clang-cl, as upstream RT64)
         run: cmake -S . -B build-rci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DSBK_RENDERER_COMPILE_CI=ON -DSBK_BUILD_RENDERER_STACK=ON
       - name: Build RT64, RecompFrontend and runtime config
@@ -101,30 +101,41 @@ jobs:
         run: cmake --build build-engine
       - name: Engine-only tests (includes synthetic module probe)
         run: ctest --test-dir build-engine --output-on-failure -V
-      - name: Research - RT64 run-time DXIL path without dxil.dll (report only)
+      - name: Every shader is compiled by the pinned DXC release
+        run: python tests/release/dxc_release_compat.py --build build-engine --expect-pinned
+      - name: No dxil.dll dependency (imports, build output)
         shell: pwsh
         run: |
-          $sdk = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue |
-            Where-Object FullName -match '\\x64\\' | Select-Object -First 1
-          "Windows SDK dxil.dll: $($sdk.FullName)"
-          "System32 dxil.dll present: $(Test-Path $env:WINDIR\System32\dxil.dll)"
-          where.exe dxil.dll
-          Get-ChildItem build-engine/dxc-probe -Filter *.dll | Select-Object Name, Length
-          "=== run 1: default search path"
-          build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-default --report-only --control-load
-          python tests/release/dxil_hash.py (Get-ChildItem probe-default/*.dxil).FullName
-          if ($sdk) {
-            "=== run 2: Windows SDK dxil.dll first on PATH"
-            $env:PATH = "$($sdk.DirectoryName);$env:PATH"
-            build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-sdk-path --report-only --control-load
-            python tests/release/dxil_hash.py (Get-ChildItem probe-sdk-path/*.dxil).FullName
+          foreach ($image in 'build-engine/SnowboardKidsEngine.exe', 'build-engine/dxcompiler.dll',
+                             'build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe') {
+            $deps = (dumpbin /nologo /dependents $image) -join "`n"
+            if ($deps -match '(?i)dxil\.dll') { throw "$image depends on dxil.dll" }
           }
-          exit 0
-      - name: RT64 shaders compile with the pinned DXC release (DXIL signed by its dxil.dll)
-        run: python tests/release/dxc_release_compat.py --build build-engine
+          foreach ($dir in 'build-engine', 'build-engine/dxc-probe', '.deps-renderer/dxc-redist') {
+            $found = Get-ChildItem $dir -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue
+            if ($found) { throw "dxil.dll present: $($found.FullName)" }
+          }
+          "no dxil.dll imported by the engine, dxcompiler.dll or the probe; none staged"
+      - name: RT64 run-time DXIL without dxil.dll, with a validator on PATH as a decoy
+        shell: pwsh
+        run: |
+          $decoy = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue |
+            Where-Object FullName -match '\\x64\\' | Select-Object -First 1
+          if (-not $decoy) { throw "no Windows SDK dxil.dll found to use as a decoy" }
+          "decoy validator first on PATH: $($decoy.FullName)"
+          $env:PATH = "$($decoy.DirectoryName);$env:PATH"
+          Get-ChildItem build-engine/dxc-probe -Filter *.dll | Select-Object Name, Length | Format-Table | Out-String
+          $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-out --control-load
+          $code = $LASTEXITCODE
+          $out
+          if ($code -ne 0) { throw "run-time DXIL probe failed" }
+          if (-not ($out -match '^dxil\.dll loaded during the run: no$')) { throw "dxil.dll was loaded" }
+          if (-not ($out -match '^control: LoadLibraryW\(dxil\.dll\) now: .+dxil\.dll$')) { throw "decoy was not loadable: the absence check proved nothing" }
+          python tests/release/dxil_hash.py (Get-ChildItem probe-out/*.dxil).FullName
+          if ($LASTEXITCODE -ne 0) { throw "run-time containers are not retail-hashed" }
       - name: Stage ROM-free engine draft package
         run: python scripts/package-beta-windows.py --engine build-engine/SnowboardKidsEngine.exe --engine-only-draft --out-dir dist-windows
-      - name: Draft carries the pinned DXC, its notices and its provenance manifest
+      - name: Draft carries the pinned DXC and its notices, and no dxil.dll
         shell: pwsh
         run: |
           $zip = Get-ChildItem dist-windows -Filter *-engine-draft.zip | Select-Object -First 1
@@ -140,11 +151,10 @@ jobs:
                    'RUNTIME-DLLS.txt', 'licenses/SDL2.txt') {
             if ("SnowboardKidsRecompiled/$n" -notin $names) { throw "draft is missing $n" }
           }
-          # dxil.dll waits for the maintainer decision in docs/DXIL-REDISTRIBUTION.md
-          $accepted = python -c "import sys; sys.path.insert(0, 'scripts'); import dxc_redist; print(dxc_redist.dxil_redistribution_accepted())"
-          if ($accepted -ne 'True' -and "SnowboardKidsRecompiled/dxil.dll" -in $names) { throw "dxil.dll shipped while the decision is pending" }
+          # The pinned DXC signs shaders itself: its validator is never shipped.
+          if ($names -match '(?i)dxil\.dll$|LICENSE-MS') { throw "draft contains dxil.dll or its license" }
           if ($info -notmatch 'Package: draft \(not a release candidate') { throw "draft not labelled as draft" }
-          if ($dlls -notmatch 'sha256: 570a1a7357893615417edf5ab356625b5b6b721a131bc7331bf17289d4928ed7') { throw "dxcompiler.dll is not the pinned release" }
+          if ($dlls -notmatch 'sha256: 5888d3e590f5bfd8743484e7f31313996734adec5741506271a5c6368cbe8ba9') { throw "dxcompiler.dll is not the pinned release" }
           python scripts/audit_release_artifact.py $zip.FullName
           if ($LASTEXITCODE -ne 0) { throw "artifact audit failed" }
       - uses: actions/upload-artifact@v4

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Compile RT64's and RecompFrontend's shaders with the pinned DXC release.
+"""Check which DXC compiles RT64's and RecompFrontend's shaders in a build.
 
-Windows packages ship dxcompiler.dll/dxil.dll from the official Microsoft
-DirectXShaderCompiler release pinned in scripts/dxc_redist.py, not the
-unsigned development build RT64's contrib compiles with at build time. RT64
-compiles the same HLSL sources at run time through dxcompiler.dll, so every
-shader command of a configured build is replayed here with the pinned
-compiler (arguments unchanged, outputs to a temporary directory). A failure
-means the release cannot compile a shader the renderer uses.
+Windows builds must compile every shader with the pinned official DXC release
+(scripts/dxc_redist.py, passed to RT64 by rt64-dxc-executable.patch): RT64
+links run-time shaders against build-time library shaders, and IDxcLinker only
+accepts libraries from the same compiler. This lists the shader commands of a
+configured Ninja build and fails if any uses another compiler (e.g. RT64's
+contrib dxc.exe).
 
-    python tests/release/dxc_release_compat.py --build build-engine
+    python tests/release/dxc_release_compat.py --build build-engine --expect-pinned
+
+With --replay DXC, every command is re-run with that compiler instead
+(arguments unchanged, outputs to a temporary directory): used to evaluate a
+candidate release against the renderer's shaders before pinning it.
 """
 import argparse
 from pathlib import Path
@@ -23,17 +26,20 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import dxc_redist  # noqa: E402
 
-CONTRIB_DXC = re.compile(r"contrib[/\\]dxc[/\\]bin[/\\](?:x64|arm64)[/\\]dxc(?:\.exe|-linux|-macos)\"?",
-                         re.IGNORECASE)
+# The compiler path, quoted when it contains spaces.
+DXC_TOOL = re.compile(r'"([^"]*[/\\]dxc(?:\.exe|-linux|-macos))"|([^\s"]*[/\\]dxc(?:\.exe|-linux|-macos))',
+                      re.IGNORECASE)
 
 
 def shader_commands(build: Path):
+    """(compiler path, arguments) for every DXC invocation of the build."""
     listing = subprocess.run(["ninja", "-C", str(build), "-t", "commands"], capture_output=True,
                              text=True, check=True).stdout
     for line in listing.splitlines():
-        match = CONTRIB_DXC.search(line)
+        match = DXC_TOOL.search(line)
         if not match:
             continue
+        tool = match.group(1) or match.group(2)
         tail = line[match.end():].strip()
         if tail.endswith('"') and tail.count('"') % 2:
             tail = tail[:-1]  # closing quote of a Windows "cmd /C" wrapper
@@ -42,39 +48,52 @@ def shader_commands(build: Path):
                     for a in shlex.split(tail, posix=False)]
         else:
             args = shlex.split(tail)
-        yield args
+        yield tool, args
+
+
+def same_file(a: str, b: Path) -> bool:
+    try:
+        return Path(a).resolve() == b.resolve()
+    except OSError:
+        return False
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--build", type=Path, required=True, help="configured Ninja build directory")
-    parser.add_argument("--dxc", type=Path, default=dxc_redist.dll_dir() / "dxc.exe",
-                        help="compiler to test (default: the pinned release dxc.exe)")
+    parser.add_argument("--expect-pinned", action="store_true",
+                        help=f"fail unless every shader command uses the pinned {dxc_redist.RELEASE_TAG} dxc.exe")
+    parser.add_argument("--replay", type=Path, default=None, help="re-run every command with this compiler")
     args = parser.parse_args()
-    if not args.dxc.is_file():
-        print(f"FAIL: {args.dxc} not found; run: python scripts/bootstrap.py --only dxc", file=sys.stderr)
-        return 1
-    failures = 0
-    count = 0
-    with tempfile.TemporaryDirectory(prefix="sbk_dxc_compat_") as tmp:
-        for count, command in enumerate(shader_commands(args.build), start=1):
-            if "/Fo" not in command or command.index("/Fo") + 1 >= len(command):
-                print(f"FAIL: unexpected shader command: {command}", file=sys.stderr)
-                return 1
-            out = command.index("/Fo") + 1
-            source = next((a for a in command if a.lower().endswith(".hlsl")), "?")
-            command[out] = str(Path(tmp) / f"{count}.out")
-            result = subprocess.run([str(args.dxc), *command], capture_output=True, text=True)
-            status = "ok" if result.returncode == 0 else "FAIL"
-            print(f"{status}: {Path(source).name} {' '.join(a for a in command if a.startswith(('-T', '-E', '-spirv')))}")
-            if result.returncode != 0:
-                failures += 1
-                print(result.stdout + result.stderr, file=sys.stderr)
-    if count == 0:
+    commands = list(shader_commands(args.build))
+    if not commands:
         print("FAIL: no shader commands found in the build", file=sys.stderr)
         return 1
-    print(f"{count - failures}/{count} shader commands compile with {args.dxc.name} "
-          f"({dxc_redist.RELEASE_TAG} pinned release)")
+    failures = 0
+    if args.expect_pinned:
+        pinned = dxc_redist.dxc_exe()
+        others = sorted({tool for tool, _ in commands if not same_file(tool, pinned)})
+        for tool in others:
+            print(f"FAIL: shader command uses {tool}, not the pinned {pinned}", file=sys.stderr)
+        failures += len(others)
+        if not others:
+            print(f"{len(commands)} shader commands, all compiled by the pinned "
+                  f"{dxc_redist.RELEASE_TAG} dxc.exe")
+    if args.replay is not None:
+        with tempfile.TemporaryDirectory(prefix="sbk_dxc_compat_") as tmp:
+            for index, (_, command) in enumerate(commands, start=1):
+                if "/Fo" not in command or command.index("/Fo") + 1 >= len(command):
+                    print(f"FAIL: unexpected shader command: {command}", file=sys.stderr)
+                    return 1
+                command[command.index("/Fo") + 1] = str(Path(tmp) / f"{index}.out")
+                source = next((a for a in command if a.lower().endswith(".hlsl")), "?")
+                result = subprocess.run([str(args.replay), *command], capture_output=True, text=True)
+                print(f"{'ok' if result.returncode == 0 else 'FAIL'}: {Path(source).name} "
+                      f"{' '.join(a for a in command if a.startswith(('-T', '-E', '-spirv')))}")
+                if result.returncode != 0:
+                    failures += 1
+                    print(result.stdout + result.stderr, file=sys.stderr)
+        print(f"{len(commands) - failures}/{len(commands)} shader commands compile with {args.replay}")
     return 1 if failures else 0
 
 

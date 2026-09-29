@@ -97,31 +97,39 @@ class RuntimePolicyTests(unittest.TestCase):
             module.write_bytes(make_pe(['SnowboardKidsEngine.exe', 'KERNEL32.dll', 'MSVCP140.dll']))
             (d / 'SDL2.dll').write_bytes(make_pe(['KERNEL32.dll', 'USER32.dll']))
             (d / 'dxcompiler.dll').write_bytes(make_pe(['KERNEL32.dll']))
-            (d / 'dxil.dll').write_bytes(make_pe(['KERNEL32.dll']))
+            (d / 'dxil.dll').write_bytes(make_pe(['KERNEL32.dll']))  # present, never pulled in
             (d / 'vcruntime140.dll').write_bytes(make_pe(['KERNEL32.dll']))
             (d / 'msvcp140.dll').write_bytes(make_pe(['vcruntime140.dll']))
             result = resolve_runtime([engine, module], [d])
             self.assertEqual(result.errors, [])
             self.assertEqual(set(result.bundled),
-                             {'SDL2.dll', 'dxcompiler.dll', 'dxil.dll', 'vcruntime140.dll', 'msvcp140.dll'})
+                             {'SDL2.dll', 'dxcompiler.dll', 'vcruntime140.dll', 'msvcp140.dll'})
             self.assertNotIn('snowboardkidsengine.exe', result.system)
             self.assertIn('kernel32.dll', result.system)
             self.assertEqual(result.missing_license_texts(ROOT) == [],
                              (ROOT / REDISTRIBUTABLES['sdl2.dll'].licenses[0][1]).is_file())
-            # dxcompiler.dll is cleared by its vendored texts; dxil.dll waits
-            # for the recorded maintainer decision on Microsoft's terms.
-            pending = result.pending_licenses(ROOT)
-            if dxc_redist.dxil_redistribution_accepted(ROOT):
-                self.assertEqual(pending, [])
-            else:
-                self.assertEqual(len(pending), 1)
-                self.assertTrue(pending[0].startswith('dxil.dll'), pending)
+            # dxcompiler.dll is cleared by its vendored texts; nothing is pending.
+            self.assertEqual(result.pending_licenses(ROOT), [])
             files = result.license_files(ROOT)
-            self.assertEqual(set(files), {'SDL2', *dxc_redist.DLLS['dxcompiler.dll']['notices'],
-                                          *dxc_redist.DLLS['dxil.dll']['notices']})
+            self.assertEqual(set(files), {'SDL2', *dxc_redist.DLLS['dxcompiler.dll']['notices']})
             # Synthetic stand-ins are not the pinned Microsoft binaries.
             errors = result.pinned_hash_errors()
-            self.assertEqual(sorted(e.split()[0] for e in errors), ['dxcompiler.dll', 'dxil.dll'])
+            self.assertEqual(sorted(e.split()[0] for e in errors), ['dxcompiler.dll'])
+
+    def test_dxil_dependency_fails_closed(self):
+        # Anything importing the DXC validator is an unreviewed DLL: the pinned
+        # compiler does not need it, so a new dependency on it must be noticed.
+        with tempfile.TemporaryDirectory() as directory:
+            d = Path(directory)
+            engine = d / 'SnowboardKidsEngine.exe'
+            engine.write_bytes(make_pe(['KERNEL32.dll', 'dxcompiler.dll']))
+            (d / 'dxcompiler.dll').write_bytes(make_pe(['KERNEL32.dll'], ['dxil.dll']))
+            (d / 'dxil.dll').write_bytes(make_pe(['KERNEL32.dll']))
+            result = resolve_runtime([engine], [d])
+            self.assertTrue(any('dxil.dll' in e and 'neither' in e for e in result.errors), result.errors)
+            self.assertNotIn('dxil.dll', result.bundled)
+        self.assertNotIn('dxil.dll', REDISTRIBUTABLES)
+        self.assertEqual(dxc_redist.FORBIDDEN_DLLS, ('dxil.dll',))
 
     def test_unknown_and_missing_dlls_fail_closed(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -208,6 +216,8 @@ class WindowsArchiveTests(unittest.TestCase):
             'Controller Pak 1.mpk': 'forbidden file',
             'portable.txt': 'forbidden file',
             'snowboardkids.z64': 'forbidden file',
+            'dxil.dll': 'forbidden DXC validator DLL',
+            'DXIL.DLL': 'forbidden DXC validator DLL',
         }
         for name, expected in cases.items():
             errors = self._audit({name: b'MZ'})
@@ -247,10 +257,10 @@ class RedistributionGateTests(unittest.TestCase):
         wrong = b'[bundled] SDL2.dll\nsha256: ' + b'0' * 64 + b'\n'
         errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': wrong})
         self.assertTrue(any('does not match the archived file' in e for e in errors), errors)
-        extra = b'[bundled] dxil.dll\nsha256: 00\n\n[bundled] SDL2.dll\nsha256: ' + \
+        extra = b'[bundled] dxv.dll\nsha256: 00\n\n[bundled] SDL2.dll\nsha256: ' + \
             hashlib.sha256(b'MZ sdl').hexdigest().encode() + b'\n'
         errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': extra})
-        self.assertEqual(errors, ['RUNTIME-DLLS.txt lists dxil.dll, which is not in the archive'])
+        self.assertEqual(errors, ['RUNTIME-DLLS.txt lists dxv.dll, which is not in the archive'])
         missing = b'[system] kernel32.dll\n'
         errors = self.audit_with({**entries, 'RUNTIME-DLLS.txt': missing})
         self.assertIn('SDL2.dll is not described in RUNTIME-DLLS.txt', errors)
@@ -269,16 +279,19 @@ class RedistributionGateTests(unittest.TestCase):
                 {'SDL2.dll': sdl, 'dxcompiler.dll': dxc}, ['user32.dll', 'kernel32.dll'], [])))
             self.assertNotIn(str(d), text)
             self.assertNotIn('\\', text)
-            self.assertIn('version: 1.7.2308.7', text)
+            self.assertIn(f"version: {dxc_redist.DLLS['dxcompiler.dll']['version']}", text)
             self.assertIn(dxc_redist.ARCHIVE_URL, text)
             self.assertIn('licenses: licenses/DirectXShaderCompiler-LICENSE-LLVM.txt', text)
             self.assertIn('evidence: text', text)
 
     def test_vendored_license_texts_match_pins(self):
         self.assertEqual(dxc_redist.verify_license_texts(ROOT), [])
-        # README: LICENSE-LLVM.txt applies to dxcompiler.dll, LICENSE-MS.txt to dxil.dll.
+        # Release notes: LICENSE-LLVM.txt applies to every file but d3d12shader.h.
         self.assertIn('LICENSE-LLVM.txt', dxc_redist.DLLS['dxcompiler.dll']['notices'].values())
-        self.assertEqual(list(dxc_redist.DLLS['dxil.dll']['notices'].values()), ['LICENSE-MS.txt'])
+        self.assertEqual(set(dxc_redist.DLLS), {'dxcompiler.dll'})
+        # Only dxcompiler's own texts ship: no Microsoft validator terms.
+        vendored = {p.name for p in (ROOT / dxc_redist.LICENSE_DIR).iterdir()}
+        self.assertEqual(vendored, set(dxc_redist.LICENSE_TEXTS))
 
     def test_missing_or_edited_license_text_blocks(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -290,23 +303,15 @@ class RedistributionGateTests(unittest.TestCase):
             for name in dxc_redist.LICENSE_TEXTS:
                 (target / name).write_bytes((ROOT / dxc_redist.LICENSE_DIR / name).read_bytes())
             self.assertEqual(dxc_redist.verify_license_texts(root), [])
-            (target / 'LICENSE-MS.txt').write_bytes(b'summarised terms')
+            (target / 'LICENSE.TXT').write_bytes(b'summarised terms')
             self.assertEqual(len(dxc_redist.verify_license_texts(root)), 1)
 
-    def test_dxil_decision_must_be_explicitly_accepted(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            self.assertFalse(dxc_redist.dxil_redistribution_accepted(root))
-            record = root / dxc_redist.DXIL_DECISION
-            record.parent.mkdir(parents=True)
-            record.write_text('Decision: PENDING\nDecision: ACCEPTED is what it would say\n')
-            self.assertFalse(dxc_redist.dxil_redistribution_accepted(root))
-            for placeholder in ('Decision: ACCEPTED (<maintainer>, <YYYY-MM-DD>)\n',
-                                'Decision: ACCEPTED\n', 'Decision: ACCEPTED (maintainer)\n'):
-                record.write_text(placeholder)
-                self.assertFalse(dxc_redist.dxil_redistribution_accepted(root), placeholder)
-            record.write_text('Decision: ACCEPTED (maintainer, 2026-01-01)\n')
-            self.assertTrue(dxc_redist.dxil_redistribution_accepted(root))
+    def test_pinned_release_signs_without_the_validator(self):
+        # v1.8.2505+: "The compiler will now always use the internal validator
+        # instead of searching for an external DXIL.dll" (release notes).
+        major, minor, build, _ = (int(p) for p in dxc_redist.DLLS['dxcompiler.dll']['version'].split('.'))
+        self.assertGreaterEqual((major, minor, build), (1, 8, 2505))
+        self.assertFalse(any('dxil' in member.lower() or 'dxv' in member.lower() for member in dxc_redist.FILES))
 
     def test_rt64_contrib_dxc_is_not_the_pinned_release(self):
         # rt64/dxc-bin@cc15e715 ships an unsigned dxcompiler.dll matching no release.
@@ -317,10 +322,15 @@ class RedistributionGateTests(unittest.TestCase):
         self.assertNotEqual(sha256_file(contrib), dxc_redist.FILES['bin/x64/dxcompiler.dll'])
         self.assertTrue(dxc_redist.verify_dll(contrib))
 
-    def test_cmake_copies_the_pinned_release(self):
+    def test_cmake_uses_only_the_pinned_release(self):
         cmake = (ROOT / 'CMakeLists.txt').read_text()
         self.assertIn(f'.deps-renderer/dxc-redist/{dxc_redist.RELEASE_TAG}/bin/x64', cmake)
         self.assertNotIn('src/contrib/dxc/bin/x64/dxcompiler.dll', cmake)
+        self.assertNotIn('src/contrib/dxc/bin/x64/dxc.exe', cmake)  # build-time shaders too
+        self.assertNotIn('dxil.dll"', cmake)
+        self.assertIn('set(RT64_DXC_EXECUTABLE', cmake)
+        from dependency_lock import DEPENDENCIES
+        self.assertIn('rt64-dxc-executable.patch', DEPENDENCIES['rt64'].patches)
 
     def test_installed_release_matches_pins_and_versions(self):
         if dxc_redist.verify_install(ROOT):
@@ -349,9 +359,7 @@ class ReadinessRuntimeTests(unittest.TestCase):
             self.assertEqual(name, 'windows_runtime_redistribution')
             self.assertIn('dxcompiler.dll is not the pinned', detail)
             name, detail = check_windows_runtime(self.archive(directory, {'dxil.dll': b'MZ'}))
-            self.assertIn('dxil.dll is not the pinned', detail)
-            if not dxc_redist.dxil_redistribution_accepted(ROOT):
-                self.assertIn('decision is not ACCEPTED', detail)
+            self.assertIn('dxil.dll must not be shipped', detail)
 
     def test_linux_archive_is_not_checked(self):
         from check_release_readiness import check_windows_runtime
@@ -415,7 +423,7 @@ class PackageScriptTests(unittest.TestCase):
                                      '--engine-only-draft', '--no-run', '--out-dir', str(d / 'o')],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('is not the pinned Microsoft DirectXShaderCompiler v1.7.2308', result.stderr)
+            self.assertIn(f'is not the pinned Microsoft DirectXShaderCompiler {dxc_redist.RELEASE_TAG}', result.stderr)
             self.assertFalse(list((d / 'o').glob('*.zip')) if (d / 'o').exists() else [])
 
     def test_missing_license_text_withholds_in_draft_and_blocks_public(self):

@@ -116,6 +116,7 @@ constexpr const char *TrivialVS =
 constexpr const char *TrivialPSEntry =
     "float4 shade(float4 c);"
     "[shader(\"pixel\")] float4 PSMain() : SV_Target { return shade(float4(1, 0.5, 0.25, 1)); }";
+constexpr const char *TrivialPSCompiled = "float4 PSMain() : SV_Target { return float4(1, 0.5, 0.25, 1); }";
 constexpr const char *TrivialPSLibrary = "export float4 shade(float4 c) { return c * 0.5; }";
 
 std::vector<uint8_t> compileText(const RT64::ShaderCompiler &compiler, const char *text, const wchar_t *entry,
@@ -141,6 +142,21 @@ std::vector<uint8_t> linkTrivialPS(const RT64::ShaderCompiler &compiler) {
     return result;
 }
 
+// Prints and clears the D3D12 debug-layer messages, when the layer is installed.
+void dumpMessages(ID3D12Device *device) {
+    ID3D12InfoQueue *queue = nullptr;
+    if (FAILED(device->QueryInterface(IID_PPV_ARGS(&queue)))) return;
+    for (UINT64 i = 0; i < queue->GetNumStoredMessages(); i++) {
+        SIZE_T size = 0;
+        queue->GetMessage(i, nullptr, &size);
+        std::vector<char> storage(size);
+        auto *message = reinterpret_cast<D3D12_MESSAGE *>(storage.data());
+        if (SUCCEEDED(queue->GetMessage(i, message, &size))) std::printf("  d3d12: %s\n", message->pDescription);
+    }
+    queue->ClearStoredMessages();
+    queue->Release();
+}
+
 HRESULT createPipeline(ID3D12Device *device, ID3D12RootSignature *root, const std::vector<uint8_t> &vs,
                        const std::vector<uint8_t> &ps) {
     D3D12_GRAPHICS_PIPELINE_STATE_DESC desc = {};
@@ -159,6 +175,7 @@ HRESULT createPipeline(ID3D12Device *device, ID3D12RootSignature *root, const st
     ID3D12PipelineState *pipeline = nullptr;
     HRESULT result = device->CreateGraphicsPipelineState(&desc, IID_PPV_ARGS(&pipeline));
     if (pipeline) pipeline->Release();
+    dumpMessages(device);
     return result;
 }
 
@@ -166,11 +183,25 @@ void warpChecks(const RT64::ShaderCompiler &compiler, const std::filesystem::pat
     IDXGIFactory4 *factory = nullptr;
     IDXGIAdapter *warp = nullptr;
     ID3D12Device *device = nullptr;
+    ID3D12Debug *debug = nullptr;
+    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
+        debug->EnableDebugLayer();
+        debug->Release();
+        std::printf("D3D12 debug layer enabled\n");
+    } else {
+        std::printf("D3D12 debug layer not installed (no message details)\n");
+    }
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))) ||
         FAILED(D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)))) {
         check(false, "create a D3D12 device on the WARP adapter");
         return;
     }
+    D3D12_FEATURE_DATA_SHADER_MODEL model = {D3D_SHADER_MODEL_6_7};
+    while (FAILED(device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL, &model, sizeof(model))) &&
+           model.HighestShaderModel > D3D_SHADER_MODEL_5_1) {
+        model.HighestShaderModel = D3D_SHADER_MODEL(model.HighestShaderModel - 1);
+    }
+    std::printf("WARP highest shader model: 0x%X\n", model.HighestShaderModel);
     D3D12_ROOT_SIGNATURE_DESC rootDesc = {};
     ID3DBlob *serialized = nullptr;
     ID3D12RootSignature *root = nullptr;
@@ -178,13 +209,18 @@ void warpChecks(const RT64::ShaderCompiler &compiler, const std::filesystem::pat
     device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&root));
 
     const auto vs = compileText(compiler, TrivialVS, L"VSMain", L"vs_6_3");
+    const auto psCompiled = compileText(compiler, TrivialPSCompiled, L"PSMain", L"ps_6_3");
     const auto ps = linkTrivialPS(compiler);
     save(out, "warp-vs.dxil", vs);
+    save(out, "warp-ps-compiled.dxil", psCompiled);
     save(out, "warp-ps-linked.dxil", ps);
-    check(hasHash(vs) && hasHash(ps), "trivial compiled VS and linked PS carry a hash");
+    check(hasHash(vs) && hasHash(psCompiled) && hasHash(ps), "trivial compiled VS/PS and linked PS carry a hash");
+    HRESULT compiled = createPipeline(device, root, vs, psCompiled);
+    std::printf("D3D12 WARP pipeline, compiled VS + compiled PS: 0x%08lX\n", compiled);
+    check(SUCCEEDED(compiled), "D3D12 (WARP) accepts compiled shaders");
     HRESULT accepted = createPipeline(device, root, vs, ps);
     std::printf("D3D12 WARP pipeline, compiled VS + linked PS: 0x%08lX\n", accepted);
-    check(SUCCEEDED(accepted), "D3D12 (WARP) accepts the pipeline");
+    check(SUCCEEDED(accepted), "D3D12 (WARP) accepts a run-time linked PS");
 
     auto zeroed = ps;
     std::memset(zeroed.data() + 4, 0, 16);
@@ -207,6 +243,7 @@ void warpChecks(const RT64::ShaderCompiler &compiler, const std::filesystem::pat
 } // namespace
 
 int main(int argc, char **argv) {
+    std::setvbuf(stdout, nullptr, _IONBF, 0); // keep output ordered in CI logs
     if (argc < 2) {
         std::fprintf(stderr, "usage: %s <out-dir> [--report-only] [--control-load]\n", argv[0]);
         return 2;
