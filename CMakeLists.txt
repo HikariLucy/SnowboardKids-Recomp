@@ -607,6 +607,8 @@ if(SBK_BUILD_NATIVE_BOOT)
     )
     target_include_directories(SnowboardKidsFirstRunUITest PRIVATE src ${SDL2_INCLUDE_DIRS})
     target_link_libraries(SnowboardKidsFirstRunUITest PRIVATE SDL2::SDL2 Freetype::Freetype)
+    # The test owns main(); on Windows SDL.h would otherwise rename it SDL_main.
+    target_compile_definitions(SnowboardKidsFirstRunUITest PRIVATE SDL_MAIN_HANDLED)
     add_test(NAME ui_first_run_layout
         COMMAND SnowboardKidsFirstRunUITest "$<TARGET_FILE_DIR:SnowboardKidsEngine>/assets")
     set_tests_properties(ui_first_run_layout PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
