@@ -510,6 +510,10 @@ if(SBK_BUILD_NATIVE_BOOT)
             # windows.h (via ultramodern) must not define min/max macros that
             # break std::min/std::max in RecompFrontend and project headers.
             target_compile_definitions(${SBK_EXE} PRIVATE NOMINMAX)
+            # rt64 links "SDL2"/"SDL2main" by name with a directory-scoped
+            # link_directories(); the executables need the same search path.
+            target_link_directories(${SBK_EXE} PRIVATE
+                "${RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64")
         endif()
         if(CMAKE_SYSTEM_NAME MATCHES "Linux")
             target_link_options(${SBK_EXE} PRIVATE -rdynamic)
