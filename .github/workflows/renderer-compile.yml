@@ -1,10 +1,11 @@
 name: Renderer stack compile (ROM-free)
 # Compiles the pinned RT64 / RecompFrontend / N64ModernRuntime stack with the
-# canonical patch series on Windows (D3D12 and Vulkan backends). No ROM,
-# no ROM-derived code, no packaging: SBK_RENDERER_COMPILE_CI is CI-only.
+# canonical patch series on Windows (D3D12 and Vulkan backends), and builds the
+# ROM-free SnowboardKidsEngine.exe (SBK_ENGINE_ONLY). No ROM, no ROM-derived
+# code and no game module ever reach this workflow.
 on:
   push:
-    branches: [main, release/v0.9.0-beta, feat/vsync-presentation]
+    branches: [main, release/v0.9.0-beta, feat/vsync-presentation, feat/windows-release]
   workflow_dispatch:
 jobs:
   windows:
@@ -52,5 +53,61 @@ jobs:
           $id = & build-pfs-clangcl/SnowboardKidsControllerPakTest.exe --compiler
           "Controller Pak test built by: $id"
           if ($id -notmatch '^ClangCl ') { throw "expected clang-cl, got: $id" }
+      - name: Diff check
+        run: git diff --check
+
+  windows-engine:
+    runs-on: windows-2022
+    timeout-minutes: 150
+    steps:
+      - name: Keep LF checkouts
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ninja
+        run: choco install ninja
+      - name: Configure Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Bootstrap pinned dependencies and canonical patches
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme
+      - name: Configure ROM-free engine (clang-cl, engine-only)
+        run: >-
+          cmake -S . -B build-engine -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+          -DSBK_RENDERER_COMPILE_CI=ON -DSBK_BUILD_RENDERER_STACK=ON
+          -DSBK_BUILD_NATIVE_BOOT=ON -DSBK_ENGINE_ONLY=ON -DSBK_CONTINUATIONS=ON
+      - name: Build SnowboardKidsEngine.exe
+        run: cmake --build build-engine --target SnowboardKidsEngine
+      - name: Engine version
+        shell: pwsh
+        run: |
+          $expected = (git rev-parse --short=12 HEAD).Trim()
+          $out = (& build-engine/SnowboardKidsEngine.exe --version) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw "--version exited with $LASTEXITCODE" }
+          $out
+          if ($out -notmatch '(?m)^Snowboard Kids Recompiled 0\.9\.0$') { throw "unexpected version banner" }
+          if ($out -notmatch "(?m)^commit $expected$") { throw "engine commit does not match HEAD $expected" }
+      - name: Engine runtime dependencies and exports
+        shell: pwsh
+        run: |
+          dumpbin /nologo /dependents build-engine/SnowboardKidsEngine.exe
+          Get-ChildItem build-engine -Filter *.dll | ForEach-Object {
+            dumpbin /nologo /dependents $_.FullName
+          }
+          dumpbin /nologo /exports build-engine/SnowboardKidsEngine.exe
+      - name: Build engine-only tests
+        run: cmake --build build-engine
+      - name: Engine-only tests (includes synthetic module probe)
+        run: ctest --test-dir build-engine --output-on-failure -V
+      - name: Stage ROM-free engine draft package
+        run: python scripts/package-beta-windows.py --engine build-engine/SnowboardKidsEngine.exe --engine-only-draft --out-dir dist-windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SnowboardKidsEngine-Windows-x86_64-draft
+          path: dist-windows/*.zip
+          retention-days: 14
+          if-no-files-found: error
       - name: Diff check
         run: git diff --check
