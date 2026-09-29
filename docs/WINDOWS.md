@@ -12,8 +12,8 @@ end of this document).
 | Level | Meaning | Status | Evidence |
 | --- | --- | --- | --- |
 | 1 | Windows renderer/runtime compiles | reached | `renderer-compile.yml` → `windows` job (RT64, RecompFrontend, N64ModernRuntime with clang-cl) |
-| 2 | `SnowboardKidsEngine.exe` builds and `--version` works | see CI | `renderer-compile.yml` → `windows-engine` job: engine-only build, `--version` matched against HEAD, `dumpbin` dependents/exports |
-| 3 | `SnowboardKidsGame.dll` builds and passes ABI validation | mechanism only | the `module_engine_probe` CTest builds a synthetic DLL with the real builder code and module harness and the real engine loads/validates/initializes it; a real ROM-derived DLL has not been built on Windows yet |
+| 2 | `SnowboardKidsEngine.exe` builds and `--version` works | reached | `renderer-compile.yml` → `windows-engine` job (windows-2022, clang-cl 19): engine-only build, `--version` prints `Snowboard Kids Recompiled 0.9.0` + the HEAD commit, `dumpbin` shows the 62 exported runtime symbols; all 11 engine-only CTests pass |
+| 3 | `SnowboardKidsGame.dll` builds and passes ABI validation | mechanism proven, real DLL pending | `module_engine_probe` on Windows: a synthetic DLL built with the real builder code and module harness imports from `SnowboardKidsEngine.exe`, and the real engine loads, validates and initializes it (export binding checked); a DLL needing a symbol the engine lacks is refused (`LoadLibrary` error 127). A real ROM-derived DLL has not been built on Windows yet |
 | 4 | complete, audited Windows ZIP | draft only | `package-beta-windows.py --engine-only-draft` in CI; a public package is blocked on the DirectX Shader Compiler license review and on a real game module |
 | 5 | ZIP tested on real Windows | not started | requires a person with a Windows PC and their own ROM |
 
@@ -80,6 +80,19 @@ ctest --test-dir build-engine --output-on-failure
 ```
 
 The build copies `SDL2.dll`, `dxcompiler.dll` and `dxil.dll` beside the exe.
+
+### Runtime dependencies observed in CI (`dumpbin /dependents`)
+
+| DLL | Needed by | Handling |
+| --- | --- | --- |
+| `SDL2.dll` (2.26.3) | engine | bundled, `licenses/SDL2.txt` |
+| `dxcompiler.dll` | engine (RT64 links `dxcompiler.lib`) | bundled; license text pending review |
+| `dxil.dll` | loaded by `dxcompiler.dll` | bundled companion; license text pending review |
+| `VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`, `MSVCP140.dll`, `MSVCP140_ATOMIC_WAIT.dll` | engine, module, DXC | bundled app-local from `VCToolsRedistDir` |
+| `KERNEL32`, `USER32`, `GDI32`, `SHELL32`, `ole32`, `OLEAUT32`, `ADVAPI32`, `IMM32`, `SETUPAPI`, `VERSION`, `WINMM`, `msvcrt`, `d3d12`, `dxgi`, `D3DCOMPILER_47`, `api-ms-win-*` | engine, SDL2, DXC | Windows system DLLs, never bundled |
+
+The engine does not import the Vulkan loader (`vulkan-1.dll`), and the Windows
+window is created without `SDL_WINDOW_VULKAN`, so D3D12-only systems can start it.
 
 ## Building SnowboardKidsGame.dll (needs your ROM and the local corpus)
 

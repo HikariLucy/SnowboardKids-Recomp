@@ -108,7 +108,11 @@ def main() -> int:
         print(f"  bundled  {name}  ({path})")
     if runtime.errors:
         return fail("runtime dependency policy:\n  " + "\n  ".join(runtime.errors))
-    pending = runtime.pending_licenses()
+    license_files = runtime.license_files(ROOT)
+    missing_texts = sorted(notice for notice, path in license_files.items() if not path.is_file())
+    for notice in missing_texts:
+        del license_files[notice]
+    pending = runtime.pending_licenses() + [f"{notice} (license text not bootstrapped)" for notice in missing_texts]
     if pending:
         message = ("bundled DLLs without reviewed license text in the pinned tree: " + ", ".join(pending))
         if not draft:
@@ -132,7 +136,7 @@ def main() -> int:
            "--architecture", "x86_64", "--out", str(archive)]
     for path in runtime.bundled.values():
         cmd += ["--library", str(path)]
-    for notice, path in sorted(runtime.license_files(ROOT).items()):
+    for notice, path in sorted(license_files.items()):
         cmd += ["--license", f"{notice}={path}"]
     cmd += ["--draft"] if draft else ["--game-module", str(module), "--public-beta"]
     subprocess.run(cmd, check=True)
