@@ -34,6 +34,9 @@
 
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#if defined(_WIN32)
+#include <SDL_syswm.h>
+#endif
 #include "nfd.h"
 #include "sbk_version.h"
 
@@ -392,6 +395,13 @@ ultramodern::gfx_callbacks_t::gfx_data_t create_gfx() {
 ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::gfx_data_t) {
     constexpr int width = 1280;
     constexpr int height = 720;
+    // Only an SDL/Vulkan RT64 window needs the Vulkan flag; on Windows RT64
+    // uses the native HWND and must not require a Vulkan loader to open.
+#if defined(RT64_SDL_WINDOW_VULKAN)
+    constexpr Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN;
+#else
+    constexpr Uint32 window_flags = SDL_WINDOW_RESIZABLE;
+#endif
 
     window = SDL_CreateWindow(
         "Snowboard Kids: Recompiled",
@@ -399,7 +409,7 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
         SDL_WINDOWPOS_CENTERED,
         width,
         height,
-        SDL_WINDOW_RESIZABLE | SDL_WINDOW_VULKAN
+        window_flags
     );
 
     if (window == nullptr) {
@@ -407,8 +417,20 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
         std::exit(EXIT_FAILURE);
     }
 
+#if defined(_WIN32)
+    // RT64 on Windows renders to the native HWND owned by this thread.
+    SDL_SysWMinfo wm_info;
+    SDL_VERSION(&wm_info.version);
+    if (!SDL_GetWindowWMInfo(window, &wm_info)) {
+        std::fprintf(stderr, "SDL_GetWindowWMInfo failed: %s\n", SDL_GetError());
+        std::exit(EXIT_FAILURE);
+    }
+    std::printf("SDL window created: %dx%d\n", width, height);
+    return ultramodern::renderer::WindowHandle{wm_info.info.win.window, GetCurrentThreadId()};
+#else
     std::printf("SDL/Vulkan window created: %dx%d\n", width, height);
     return window;
+#endif
 }
 
 void update_gfx(ultramodern::gfx_callbacks_t::gfx_data_t) {
