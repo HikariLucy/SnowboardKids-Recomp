@@ -21,7 +21,7 @@ SYSTEM_DLLS = frozenset({
     "advapi32.dll", "bcrypt.dll", "cfgmgr32.dll", "comctl32.dll", "comdlg32.dll",
     "crypt32.dll", "d3d11.dll", "d3d12.dll", "d3dcompiler_47.dll", "dbghelp.dll",
     "dinput8.dll", "dwmapi.dll", "dxgi.dll", "gdi32.dll", "hid.dll", "imm32.dll",
-    "kernel32.dll", "kernelbase.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll",
+    "kernel32.dll", "kernelbase.dll", "msvcrt.dll", "ntdll.dll", "ole32.dll", "oleaut32.dll",
     "powrprof.dll", "propsys.dll", "rpcrt4.dll", "sechost.dll", "setupapi.dll",
     "shell32.dll", "shlwapi.dll", "ucrtbase.dll", "user32.dll", "userenv.dll",
     "uxtheme.dll", "version.dll", "winmm.dll", "ws2_32.dll", "xinput1_4.dll",

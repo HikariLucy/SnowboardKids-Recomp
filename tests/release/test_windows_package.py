@@ -76,7 +76,9 @@ class RuntimePolicyTests(unittest.TestCase):
         self.assertEqual(REDISTRIBUTABLE_DLLS, set(REDISTRIBUTABLES))
 
     def test_system_dlls_are_never_bundled(self):
-        for name in ('KERNEL32.dll', 'user32.dll', 'api-ms-win-crt-runtime-l1-1-0.dll', 'd3d12.dll'):
+        # msvcrt.dll is the OS C runtime the pinned SDL2.dll links (seen in CI).
+        for name in ('KERNEL32.dll', 'user32.dll', 'api-ms-win-crt-runtime-l1-1-0.dll', 'd3d12.dll',
+                     'msvcrt.dll', 'D3DCOMPILER_47.dll'):
             self.assertTrue(is_system_dll(name), name)
         for name in REDISTRIBUTABLES:
             self.assertFalse(is_system_dll(name), name)
