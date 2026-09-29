@@ -506,6 +506,11 @@ if(SBK_BUILD_NATIVE_BOOT)
         elseif(MSVC)
             target_compile_options(${SBK_EXE} PRIVATE /permissive-)
         endif()
+        if(WIN32)
+            # windows.h (via ultramodern) must not define min/max macros that
+            # break std::min/std::max in RecompFrontend and project headers.
+            target_compile_definitions(${SBK_EXE} PRIVATE NOMINMAX)
+        endif()
         if(CMAKE_SYSTEM_NAME MATCHES "Linux")
             target_link_options(${SBK_EXE} PRIVATE -rdynamic)
         endif()
