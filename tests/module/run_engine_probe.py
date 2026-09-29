@@ -91,7 +91,8 @@ def pe_dependents(module: Path):
         return None
     out = subprocess.run([dumpbin, "/nologo", "/dependents", str(module)],
                          capture_output=True, text=True, check=True).stdout
-    return {line.strip().lower() for line in out.splitlines() if line.strip().lower().endswith((".dll", ".exe"))}
+    return {line.strip().lower() for line in out.splitlines()
+            if line.strip().lower().endswith((".dll", ".exe")) and not line.strip().lower().startswith("dump of file")}
 
 
 def main() -> int:
@@ -134,10 +135,13 @@ def main() -> int:
         # A module needing a symbol the engine does not export must be refused
         # by the loader instead of crashing later.
         missing_src = work / "probe_missing_export.cpp"
+        # Exported so the linker cannot discard the only reference (/OPT:REF).
         missing_src.write_text(
             '#include "recomp.h"\n'
+            '#if defined(_WIN32)\n#define SBK_PROBE_KEEP __declspec(dllexport)\n'
+            '#else\n#define SBK_PROBE_KEEP __attribute__((visibility("default")))\n#endif\n'
             f'extern "C" void {MISSING_EXPORT}(uint8_t* rdram, recomp_context* ctx);\n'
-            f'extern "C" void sbk_probe_use_missing(uint8_t* r, recomp_context* c) {{ {MISSING_EXPORT}(r, c); }}\n'
+            f'extern "C" SBK_PROBE_KEEP void sbk_probe_use_missing(uint8_t* r, recomp_context* c) {{ {MISSING_EXPORT}(r, c); }}\n'
         )
         try:
             bad = build_probe(toolchain, work / "bad", [missing_src], [MISSING_EXPORT])
