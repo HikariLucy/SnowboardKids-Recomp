@@ -4,8 +4,8 @@ Snowboard Kids Recompiled public binaries are distributed from this repository:
 
 https://github.com/HikariLucy/SnowboardKids-Recomp
 
-For `v0.9.0-beta`, the GitHub Release must point to the exact tag
-`v0.9.0-beta`. GitHub's source archive for that tag and the repository history
+For `v0.9.0-beta.1`, the GitHub Release must point to the exact tag
+`v0.9.0-beta.1`. GitHub's source archive for that tag and the repository history
 provide the project-authored source, build scripts, dependency lock and patch
 series used by the engine.
 
