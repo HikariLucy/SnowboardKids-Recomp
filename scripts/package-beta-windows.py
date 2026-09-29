@@ -8,8 +8,8 @@ package_release.py / audit / readiness gates. Steps:
   2. run SnowboardKidsEngine.exe --version and match HEAD + project version;
   3. run --validate-module on the reviewed SnowboardKidsGame.dll;
   4. derive runtime DLLs from the real PE imports (scripts/windows_runtime.py),
-     require the pinned DXC release bytes (scripts/dxc_redist.py), their
-     license texts and a recorded dxil.dll redistribution decision;
+     require the pinned DXC release bytes (scripts/dxc_redist.py) and their
+     license texts; the DXC validator dxil.dll is never shipped;
   5. write RUNTIME-DLLS.txt (hash, version, provenance, notices per DLL);
   6. stage reviewed assets, build the deterministic zip, audit it, and run the
      public-beta readiness gate.
@@ -21,7 +21,7 @@ Public package (any blocker stops it):
 
 --engine-only-draft packages the ROM-free engine without a game module for CI
 review. Drafts say so in BUILD-INFO.txt and their file name, leave out DLLs
-whose redistribution is not cleared, and are never release candidates.
+whose license text is not bootstrapped, and are never release candidates.
 """
 import argparse
 import os
@@ -129,7 +129,7 @@ def main() -> int:
     if pending:
         message = "bundled DLLs whose redistribution is not cleared: " + ", ".join(pending)
         if not draft:
-            return fail(message + f"\nSee {dxc_redist.DXIL_DECISION.as_posix()} and docs/DXC-PROVENANCE.md.")
+            return fail(message + "\nSee docs/DXC-PROVENANCE.md and scripts/windows_runtime.py.")
         withheld = [name for name in runtime.bundled if any(p.startswith(name + " ") for p in pending)]
         for name in withheld:
             del runtime.bundled[name]

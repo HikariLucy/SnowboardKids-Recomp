@@ -32,9 +32,6 @@ SYSTEM_PREFIXES = ("api-ms-win-", "ext-ms-win-")
 
 # License evidence kinds for a bundled DLL:
 #   "text"         every text in `licenses` ships as licenses/<notice>.txt
-#   "ms-terms"     "text", plus Microsoft distributable-code terms whose
-#                  distribution requirements need a recorded maintainer
-#                  decision (dxc_redist.DXIL_DECISION) before a public package
 #   "msvc-redist"  Microsoft Visual C++ Redistributable "Distributable Code";
 #                  app-local deployment per the Visual Studio license terms
 #   "pending"      no reviewed license text: blocks public packages
@@ -56,11 +53,11 @@ _MSVC_SOURCE = "Microsoft Visual C++ Redistributable (VCToolsRedistDir, app-loca
 _DXC_DIR = (dxc_redist.INSTALL_DIR / "bin" / "x64").as_posix()
 
 
-def _dxc(name: str, evidence: str, companions: Tuple[str, ...] = ()) -> Redistributable:
+def _dxc(name: str, evidence: str) -> Redistributable:
     entry = dxc_redist.DLLS[name]
     licenses = tuple((notice, (dxc_redist.LICENSE_DIR / text).as_posix())
                      for notice, text in entry["notices"].items())
-    return Redistributable(name, _DXC_DIR, next(iter(entry["notices"])), evidence, licenses, companions,
+    return Redistributable(name, _DXC_DIR, next(iter(entry["notices"])), evidence, licenses, (),
                            dxc_redist.PROVENANCE, entry["version"], dxc_redist.FILES[entry["member"]])
 
 REDISTRIBUTABLES: Dict[str, Redistributable] = {r.name.lower(): r for r in (
@@ -68,8 +65,9 @@ REDISTRIBUTABLES: Dict[str, Redistributable] = {r.name.lower(): r for r in (
                     (("SDL2", f"{_SDL2_DIR}/COPYING.txt"),),
                     provenance="SDL2 2.26.3 from RT64's pinned mupen64plus-win32-deps submodule (SDL2-2.26.3/lib/x64)",
                     version="2.26.3"),
-    _dxc("dxcompiler.dll", "text", companions=("dxil.dll",)),
-    _dxc("dxil.dll", "ms-terms"),
+    # dxil.dll is deliberately absent: the pinned DXC never loads it, so any
+    # image importing it fails staging as an unreviewed DLL.
+    _dxc("dxcompiler.dll", "text"),
     *(Redistributable(name, _MSVC_SOURCE, "MSVC-Runtime", "msvc-redist",
                       provenance="Microsoft Visual C++ Redistributable (build machine VCToolsRedistDir)")
       for name in ("vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll", "msvcp140_1.dll",
@@ -103,16 +101,13 @@ class RuntimeResolution:
             entry = REDISTRIBUTABLES[name.lower()]
             if entry.evidence == "pending":
                 pending.add(f"{entry.name} (no reviewed license text)")
-            elif entry.evidence == "ms-terms" and not dxc_redist.dxil_redistribution_accepted(root):
-                pending.add(f"{entry.name} (Microsoft distributable-code terms not accepted in "
-                            f"{dxc_redist.DXIL_DECISION.as_posix()})")
         return sorted(pending)
 
     def license_files(self, root: Path = ROOT) -> Dict[str, Path]:
         files = {}
         for name in self.bundled:
             entry = REDISTRIBUTABLES[name.lower()]
-            if entry.evidence in ("text", "ms-terms"):
+            if entry.evidence == "text":
                 for notice, path in entry.licenses:
                     files[notice] = root / path
         return files

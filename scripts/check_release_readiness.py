@@ -135,8 +135,8 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
 
     # 8. Windows runtime redistribution: bundled DXC bytes are the pinned
     # official release, their license texts are the pinned upstream texts, and
-    # dxil.dll ships only after the maintainer recorded the Microsoft
-    # distributable-code decision. Linux archives carry no DXC.
+    # the proprietary DXC validator (dxil.dll) is absent: the pinned compiler
+    # signs shaders without it. Linux archives carry no DXC.
     if archive is not None:
         name, detail = check_windows_runtime(Path(archive), root)
         if name is not None:
@@ -152,6 +152,9 @@ def check_windows_runtime(archive, root=ROOT):
             if "SnowboardKidsRecompiled/SnowboardKidsEngine.exe" not in names:
                 return None, ""
             problems = list(dxc_redist.verify_license_texts(root))
+            for dll in dxc_redist.FORBIDDEN_DLLS:
+                if any(n.lower() == f"snowboardkidsrecompiled/{dll}" for n in names):
+                    problems.append(f"{dll} must not be shipped (docs/DXC-PROVENANCE.md)")
             for dll, entry in dxc_redist.DLLS.items():
                 member = next((n for n in names if n.lower() == f"snowboardkidsrecompiled/{dll}"), None)
                 if member is None:
@@ -159,14 +162,11 @@ def check_windows_runtime(archive, root=ROOT):
                 digest = hashlib.sha256(bundle.read(member)).hexdigest()
                 if digest != dxc_redist.FILES[entry["member"]]:
                     problems.append(f"{dll} is not the pinned {dxc_redist.PROVENANCE} binary")
-                if dll == "dxil.dll" and not dxc_redist.dxil_redistribution_accepted(root):
-                    problems.append(f"dxil.dll redistribution decision is not ACCEPTED in "
-                                    f"{dxc_redist.DXIL_DECISION.as_posix()}")
     except (OSError, zipfile.BadZipFile, RuntimeError) as error:
         return "windows_runtime_redistribution", str(error)
     if problems:
         return "windows_runtime_redistribution", "; ".join(problems)
-    return "windows_runtime_redistribution", "ok: bundled DXC matches the pinned release and its notices"
+    return "windows_runtime_redistribution", "ok: bundled DXC matches the pinned release and its notices; no dxil.dll"
 
 
 def main():

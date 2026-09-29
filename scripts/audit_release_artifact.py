@@ -23,7 +23,7 @@ GAME_MODULE_PATHS = {
 GAME_MODULE_NAMES = {'snowboardkidsgame.so', 'snowboardkidsgame.dll', 'snowboardkidsgame.dylib'}
 # Keep in sync with scripts/windows_runtime.py REDISTRIBUTABLES (tested).
 REDISTRIBUTABLE_DLLS = {
-    'sdl2.dll', 'dxcompiler.dll', 'dxil.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
+    'sdl2.dll', 'dxcompiler.dll', 'vcruntime140.dll', 'vcruntime140_1.dll',
     'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll', 'msvcp140_atomic_wait.dll', 'concrt140.dll',
 }
 # A bundled DLL must ship with these licenses/ texts.
@@ -32,8 +32,9 @@ REQUIRED_NOTICES = {
     'sdl2.dll': ('SDL2',),
     'dxcompiler.dll': ('DirectXShaderCompiler-LICENSE-LLVM', 'DirectXShaderCompiler-LICENSE',
                        'DirectXShaderCompiler-ThirdPartyNotices'),
-    'dxil.dll': ('DirectXShaderCompiler-dxil-LICENSE-MS',),
 }
+# Never shipped: the pinned DXC signs shaders without its proprietary validator.
+FORBIDDEN_DLLS = {'dxil.dll'}
 ROM_MAGIC = (b'\x80\x37\x12\x40', b'\x37\x80\x40\x12', b'\x40\x12\x37\x80')
 PATH_PATTERN = re.compile(rb'/home/[^/\x00\s]+|/Users/[^/\x00\s]+|/tmp/[^\x00\s]+|[A-Za-z]:\\Users\\[^\\\x00\s]+')
 MAX_FILE = 500 * 1024 * 1024
@@ -65,6 +66,8 @@ def audit(archive):
                 errors.append(f'forbidden file: {name}')
             if path.name.lower() in GAME_MODULE_NAMES and name not in GAME_MODULE_PATHS:
                 errors.append(f'game module outside canonical release path: {name}')
+            elif path.name.lower() in FORBIDDEN_DLLS:
+                errors.append(f'forbidden DXC validator DLL: {name}')
             elif path.suffix.lower() == '.dll' and name not in GAME_MODULE_PATHS:
                 # Only reviewed redistributables, and only beside the executable.
                 if len(parts) != 2 or path.name.lower() not in REDISTRIBUTABLE_DLLS:
