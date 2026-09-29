@@ -1,18 +1,19 @@
-# Release engineering — v0.9.0-beta
+# Release engineering — v0.9.0-beta.1
 
-Updated: 2026-09-28
+Updated: 2026-09-29
 
-This document describes the first public playable beta of Snowboard Kids
-Recompiled. The validated release platform is Linux x86-64.
+This document describes the cross-platform public beta refresh of Snowboard
+Kids Recompiled. Linux x86-64 and Windows x86-64 are both validated release
+platforms for `v0.9.0-beta.1`.
 
 ## Release model
 
 The public archive uses the split runtime architecture:
 
 ```text
-SnowboardKidsEngine
+SnowboardKidsEngine(.exe)
     + reviewed frontend/assets
-    + bundled SnowboardKidsGame.so
+    + bundled SnowboardKidsGame.so / SnowboardKidsGame.dll
     + license/source notices
 
 user supplies supported Snowboard Kids (USA) ROM
@@ -23,9 +24,9 @@ user supplies supported Snowboard Kids (USA) ROM
 The archive contains no ROM and no extracted game assets. The bundled game
 module exists so normal users do not need Python or a C++ compiler.
 
-A user-installed module in
-`~/.local/share/SnowboardKids/modules/snowboardkids-us/` takes precedence over
-the bundled module.
+A user-installed module takes precedence over the bundled module. The default
+locations are `~/.local/share/SnowboardKids/modules/snowboardkids-us/` on
+Linux and `%APPDATA%\SnowboardKids\modules\snowboardkids-us\` on Windows.
 
 ## Exact dependency pins
 
@@ -90,17 +91,19 @@ ls -lh ~/.local/share/SnowboardKids/modules/snowboardkids-us/SnowboardKidsGame.s
   --validate-module ~/.local/share/SnowboardKids/modules/snowboardkids-us/SnowboardKidsGame.so
 ```
 
-Create the deterministic release package:
+Create the deterministic Linux release package for beta.1:
 
 ```bash
+SBK_RELEASE_VERSION=0.9.0-beta.1 \
+SBK_RELEASE_OUT="$PWD/dist-beta1/linux" \
 bash scripts/package-beta-linux.sh
 ```
 
 Expected outputs:
 
 ```text
-dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip
-dist/SHA256SUMS.txt
+dist-beta1/linux/SnowboardKidsRecompiled-0.9.0-beta.1-Linux-x86_64.zip
+dist-beta1/linux/SHA256SUMS.txt
 ```
 
 The script refuses dirty source trees, stale binaries, missing modules and
@@ -112,10 +115,10 @@ the artifact audit and executes the disclosed public-beta readiness policy.
 Do not test the archive from the repository directory.
 
 ```bash
-rm -rf /tmp/sbk-v090-fresh
-mkdir -p /tmp/sbk-v090-fresh
-cd /tmp/sbk-v090-fresh
-unzip ~/proyectos/Recomp/SnowboardKids-Recomp/dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip
+rm -rf /tmp/sbk-v090-beta1-fresh
+mkdir -p /tmp/sbk-v090-beta1-fresh
+cd /tmp/sbk-v090-beta1-fresh
+unzip ~/proyectos/Recomp/SnowboardKids-Recomp/dist-beta1/linux/SnowboardKidsRecompiled-0.9.0-beta.1-Linux-x86_64.zip
 cd SnowboardKidsRecompiled
 ./SnowboardKidsEngine
 ```
@@ -170,33 +173,55 @@ placed in GitHub Actions.
 
 ## Tag and GitHub Release
 
-Only after the fresh-user archive test passes:
+Only after both fresh-user archive tests pass and both archives are built from
+the same clean commit:
+
+1. copy the final Windows ZIP next to the Linux artifact;
+2. create one release-level `SHA256SUMS.txt` containing both archive hashes;
+3. tag the exact tested commit;
+4. publish both archives, the combined checksum file and the beta.1 notes.
+
+Example final publication layout:
+
+```text
+dist-beta1/release/
+├── SnowboardKidsRecompiled-0.9.0-beta.1-Linux-x86_64.zip
+├── SnowboardKidsRecompiled-0.9.0-beta.1-Windows-x86_64.zip
+└── SHA256SUMS.txt
+```
+
+Then:
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git tag -a v0.9.0-beta -m "Snowboard Kids Recompiled v0.9.0-beta"
-git push origin v0.9.0-beta
+git tag -a v0.9.0-beta.1 -m "Snowboard Kids Recompiled v0.9.0-beta.1"
+git push origin v0.9.0-beta.1
 
-gh release create v0.9.0-beta \
-  dist/SnowboardKidsRecompiled-v0.9.0-beta-Linux-x86_64.zip \
-  dist/SHA256SUMS.txt \
+gh release create v0.9.0-beta.1 \
+  dist-beta1/release/SnowboardKidsRecompiled-0.9.0-beta.1-Linux-x86_64.zip \
+  dist-beta1/release/SnowboardKidsRecompiled-0.9.0-beta.1-Windows-x86_64.zip \
+  dist-beta1/release/SHA256SUMS.txt \
   --prerelease \
-  --title "Snowboard Kids Recompiled v0.9.0-beta" \
-  --notes-file docs/releases/v0.9.0-beta.md
+  --title "Snowboard Kids Recompiled v0.9.0-beta.1" \
+  --notes-file docs/releases/v0.9.0-beta.1.md
 ```
 
 The release notes must retain the RecompFrontend licensing disclosure.
 
 ## Windows status
 
-Windows is **in development**, not supported. Hosted CI builds the ROM-free
-`SnowboardKidsEngine.exe` (`SBK_ENGINE_ONLY=ON`, `windows-engine` job), checks
-its `--version` against HEAD, lists its DLL dependencies, runs the synthetic
-module probe and uploads an engine-only draft archive. The Windows game module
-path and packaging (`scripts/package-beta-windows.py`) exist but a real
-`SnowboardKidsGame.dll` and a live gameplay test are still missing. The only
-DirectX Shader Compiler file shipped is `dxcompiler.dll` from a SHA-256-pinned
-official Microsoft release (v1.8.2505.1), with its license texts; the validator
-`dxil.dll` is neither needed nor shipped (`docs/DXC-PROVENANCE.md`). See `docs/WINDOWS.md` for the level-by-level status and the live
-validation checklist. Do not label Windows as supported until that test passes.
+Windows x86-64 is validated for the beta.1 release. Hosted CI builds the
+ROM-free `SnowboardKidsEngine.exe` with clang-cl, checks `--version` against
+HEAD, verifies the renderer/runtime stack, exercises the synthetic module probe,
+and guards the DXC/`dxil.dll` policy. A real `SnowboardKidsGame.dll` has also
+been built and validated on physical Windows from a legitimate user ROM and
+private module-input bundle.
+
+Physical testing covers the ROM selector, title/race gameplay, D3D12/RT64
+rendering, audio, keyboard, controller, rumble, official save persistence,
+F5/F8 savestates, close/reopen and clean extracted-package execution. The
+Windows release package ships `dxcompiler.dll` from the pinned official
+Microsoft DXC v1.8.2505.1 release and does not ship `dxil.dll`.
+
+See `docs/WINDOWS.md` for the detailed evidence and release checklist.
