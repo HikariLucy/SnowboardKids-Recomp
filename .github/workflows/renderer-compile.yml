@@ -129,7 +129,7 @@ jobs:
           $code = $LASTEXITCODE
           $out
           if ($code -ne 0) { throw "run-time DXIL probe failed" }
-          if (-not ($out -match '^dxil\.dll loaded during the run: no$')) { throw "dxil.dll was loaded" }
+          if (-not ($out -match '^dxil\.dll loaded by the shader compiler: no$')) { throw "dxcompiler.dll loaded dxil.dll" }
           if (-not ($out -match '^control: LoadLibraryW\(dxil\.dll\) now: .+dxil\.dll$')) { throw "decoy was not loadable: the absence check proved nothing" }
           python tests/release/dxil_hash.py (Get-ChildItem probe-out/*.dxil).FullName
           if ($LASTEXITCODE -ne 0) { throw "run-time containers are not retail-hashed" }

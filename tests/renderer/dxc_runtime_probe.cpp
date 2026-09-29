@@ -3,11 +3,13 @@
 // RT64 (D3D12) compiles generated shader text as lib_6_3 and links it with the
 // library shaders embedded at build time (RT64::RasterShader). This probe does
 // exactly that with RT64's own ShaderCompiler and generateShaderText, writes
-// the linked containers for tests/release/dxil_hash.py, and reports:
-//   - whether dxil.dll (the DXC validator/signer) got loaded, and from where;
-//   - whether the containers carry a hash (D3D12 rejects unsigned DXIL);
-//   - whether D3D12 on the WARP adapter accepts shaders produced this way and
-//     rejects the same shaders with a zeroed or corrupted hash (control).
+// the linked containers for tests/release/dxil_hash.py, and checks:
+//   - every variant compiles and links, and the result carries a hash;
+//   - dxcompiler.dll never loads dxil.dll (the separately licensed validator),
+//     even when one is on the search path (gate);
+//   - D3D12 on the WARP adapter accepts such shaders and rejects them with a
+//     zeroed or corrupted hash (controls), with and without the debug layer,
+//     reporting any OS component that loads dxil.dll meanwhile.
 //
 //   SnowboardKidsDxcRuntimeProbe <out-dir> [--report-only] [--control-load]
 //
@@ -131,11 +133,11 @@ std::vector<uint8_t> compileText(const RT64::ShaderCompiler &compiler, const cha
 
 std::vector<uint8_t> linkTrivialPS(const RT64::ShaderCompiler &compiler) {
     IDxcBlob *libs[] = {nullptr, nullptr};
-    compiler.compile(TrivialPSEntry, L"PSMain", L"lib_6_3", RenderShaderFormat::DXIL, &libs[0]);
-    compiler.compile(TrivialPSLibrary, L"shade", L"lib_6_3", RenderShaderFormat::DXIL, &libs[1]);
+    compiler.compile(TrivialPSEntry, L"PSMain", L"lib_6_2", RenderShaderFormat::DXIL, &libs[0]);
+    compiler.compile(TrivialPSLibrary, L"shade", L"lib_6_2", RenderShaderFormat::DXIL, &libs[1]);
     static const wchar_t *names[] = {L"entry", L"library"};
     IDxcBlob *linked = nullptr;
-    compiler.link(L"PSMain", L"ps_6_3", libs, names, 2, &linked);
+    compiler.link(L"PSMain", L"ps_6_2", libs, names, 2, &linked);
     if (!linked) throw std::runtime_error("trivial link produced no blob");
     auto result = bytes(linked);
     for (IDxcBlob *blob : {libs[0], libs[1], linked}) blob->Release();
@@ -179,18 +181,47 @@ HRESULT createPipeline(ID3D12Device *device, ID3D12RootSignature *root, const st
     return result;
 }
 
-void warpChecks(const RT64::ShaderCompiler &compiler, const std::filesystem::path &out) {
+struct TrivialShaders {
+    std::vector<uint8_t> vs, psCompiled, psLinked;
+};
+
+// WARP on the CI runners supports shader model 6.2, so these use 6.2 profiles
+// (RT64 itself uses lib_6_3 -> vs/ps_6_3); signing is the same code path.
+TrivialShaders compileTrivial(const RT64::ShaderCompiler &compiler, const std::filesystem::path &out) {
+    TrivialShaders shaders;
+    shaders.vs = compileText(compiler, TrivialVS, L"VSMain", L"vs_6_2");
+    shaders.psCompiled = compileText(compiler, TrivialPSCompiled, L"PSMain", L"ps_6_2");
+    shaders.psLinked = linkTrivialPS(compiler);
+    save(out, "warp-vs.dxil", shaders.vs);
+    save(out, "warp-ps-compiled.dxil", shaders.psCompiled);
+    save(out, "warp-ps-linked.dxil", shaders.psLinked);
+    check(hasHash(shaders.vs) && hasHash(shaders.psCompiled) && hasHash(shaders.psLinked),
+          "trivial compiled VS/PS and linked PS carry a hash");
+    return shaders;
+}
+
+void reportValidator(const char *phase) {
+    const std::wstring dxil = modulePath(L"dxil.dll");
+    std::wprintf(L"dxil.dll loaded after %hs: %ls\n", phase, dxil.empty() ? L"no" : dxil.c_str());
+}
+
+// Creates pipelines on WARP: the D3D12 runtime verifies the DXIL hash
+// ("signature") at shader creation. With debugLayer, the D3D12 SDK layers are
+// enabled first and their messages printed (a later, separate device).
+void runWarp(const TrivialShaders &shaders, bool debugLayer) {
+    std::printf("--- D3D12 WARP, debug layer %s ---\n", debugLayer ? "on" : "off");
+    if (debugLayer) {
+        ID3D12Debug *debug = nullptr;
+        if (FAILED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
+            std::printf("D3D12 debug layer not installed (no message details)\n");
+            return;
+        }
+        debug->EnableDebugLayer();
+        debug->Release();
+    }
     IDXGIFactory4 *factory = nullptr;
     IDXGIAdapter *warp = nullptr;
     ID3D12Device *device = nullptr;
-    ID3D12Debug *debug = nullptr;
-    if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug)))) {
-        debug->EnableDebugLayer();
-        debug->Release();
-        std::printf("D3D12 debug layer enabled\n");
-    } else {
-        std::printf("D3D12 debug layer not installed (no message details)\n");
-    }
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || FAILED(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp))) ||
         FAILED(D3D12CreateDevice(warp, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)))) {
         check(false, "create a D3D12 device on the WARP adapter");
@@ -208,30 +239,24 @@ void warpChecks(const RT64::ShaderCompiler &compiler, const std::filesystem::pat
     D3D12SerializeRootSignature(&rootDesc, D3D_ROOT_SIGNATURE_VERSION_1, &serialized, nullptr);
     device->CreateRootSignature(0, serialized->GetBufferPointer(), serialized->GetBufferSize(), IID_PPV_ARGS(&root));
 
-    const auto vs = compileText(compiler, TrivialVS, L"VSMain", L"vs_6_3");
-    const auto psCompiled = compileText(compiler, TrivialPSCompiled, L"PSMain", L"ps_6_3");
-    const auto ps = linkTrivialPS(compiler);
-    save(out, "warp-vs.dxil", vs);
-    save(out, "warp-ps-compiled.dxil", psCompiled);
-    save(out, "warp-ps-linked.dxil", ps);
-    check(hasHash(vs) && hasHash(psCompiled) && hasHash(ps), "trivial compiled VS/PS and linked PS carry a hash");
-    HRESULT compiled = createPipeline(device, root, vs, psCompiled);
-    std::printf("D3D12 WARP pipeline, compiled VS + compiled PS: 0x%08lX\n", compiled);
-    check(SUCCEEDED(compiled), "D3D12 (WARP) accepts compiled shaders");
-    HRESULT accepted = createPipeline(device, root, vs, ps);
-    std::printf("D3D12 WARP pipeline, compiled VS + linked PS: 0x%08lX\n", accepted);
-    check(SUCCEEDED(accepted), "D3D12 (WARP) accepts a run-time linked PS");
+    const char *suffix = debugLayer ? " (debug layer)" : "";
+    HRESULT compiled = createPipeline(device, root, shaders.vs, shaders.psCompiled);
+    std::printf("pipeline, compiled VS + compiled PS: 0x%08lX\n", compiled);
+    check(SUCCEEDED(compiled), (std::string("D3D12 (WARP) accepts compiled shaders") + suffix).c_str());
+    HRESULT linked = createPipeline(device, root, shaders.vs, shaders.psLinked);
+    std::printf("pipeline, compiled VS + linked PS: 0x%08lX\n", linked);
+    check(SUCCEEDED(linked), (std::string("D3D12 (WARP) accepts a run-time linked PS") + suffix).c_str());
 
-    auto zeroed = ps;
+    auto zeroed = shaders.psLinked;
     std::memset(zeroed.data() + 4, 0, 16);
-    HRESULT unsigned_ = createPipeline(device, root, vs, zeroed);
-    std::printf("D3D12 WARP pipeline, PS hash zeroed: 0x%08lX\n", unsigned_);
-    check(FAILED(unsigned_), "control: D3D12 (WARP) rejects the same PS without a hash");
-    auto corrupted = ps;
+    HRESULT unsigned_ = createPipeline(device, root, shaders.vs, zeroed);
+    std::printf("pipeline, PS hash zeroed: 0x%08lX\n", unsigned_);
+    check(FAILED(unsigned_), (std::string("control: D3D12 (WARP) rejects the PS without a hash") + suffix).c_str());
+    auto corrupted = shaders.psLinked;
     corrupted[4] ^= 0xFF;
-    HRESULT corrupt = createPipeline(device, root, vs, corrupted);
-    std::printf("D3D12 WARP pipeline, PS hash corrupted: 0x%08lX\n", corrupt);
-    check(FAILED(corrupt), "control: D3D12 (WARP) rejects the same PS with a wrong hash");
+    HRESULT corrupt = createPipeline(device, root, shaders.vs, corrupted);
+    std::printf("pipeline, PS hash corrupted: 0x%08lX\n", corrupt);
+    check(FAILED(corrupt), (std::string("control: D3D12 (WARP) rejects the PS with a wrong hash") + suffix).c_str());
 
     root->Release();
     serialized->Release();
@@ -288,15 +313,24 @@ int main(int argc, char **argv) {
             }
         }
         check(index == 4, "all RT64 runtime compile+link variants succeed");
-        warpChecks(compiler, out);
+        const TrivialShaders shaders = compileTrivial(compiler, out);
+
+        // Everything DXC does in the engine is done by now: the compiler must
+        // not have loaded the validator, even when one is on the search path.
+        const std::wstring dxil = modulePath(L"dxil.dll");
+        std::wprintf(L"dxil.dll loaded by the shader compiler: %ls\n", dxil.empty() ? L"no" : dxil.c_str());
+        check(dxil.empty(), "dxcompiler.dll never loaded dxil.dll");
+
+        // D3D12 then checks the hashes. Which OS components it loads is
+        // reported, not gated: none of them ships with the game.
+        runWarp(shaders, false);
+        reportValidator("D3D12 on WARP");
+        runWarp(shaders, true);
+        reportValidator("D3D12 on WARP with the debug layer");
     } catch (const std::exception &error) {
         std::printf("exception: %s\n", error.what());
         check(false, "probe ran to completion");
     }
-
-    const std::wstring dxil = modulePath(L"dxil.dll");
-    std::wprintf(L"dxil.dll loaded during the run: %ls\n", dxil.empty() ? L"no" : dxil.c_str());
-    check(dxil.empty(), "dxil.dll was never loaded");
 
     if (controlLoad) {
         HMODULE control = LoadLibraryW(L"dxil.dll");
