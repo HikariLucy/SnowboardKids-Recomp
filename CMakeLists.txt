@@ -125,6 +125,8 @@ if(SBK_ROM_FREE_CI)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_readiness.py")
     add_test(NAME release_windows_package
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_windows_package.py")
+    add_test(NAME release_dxil_hash
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_dxil_hash.py")
     return()
 endif()
 
@@ -305,6 +307,19 @@ if(SBK_BUILD_RENDERER_STACK)
     set(RT64_SDL_WINDOW_VULKAN TRUE)
     add_compile_definitions(HLSL_CPU)
 
+    # Windows: every shader is compiled with the pinned official DXC release
+    # (scripts/dxc_redist.py) whose dxcompiler.dll ships with the engine. RT64
+    # links run-time shaders against build-time library shaders, which
+    # IDxcLinker only accepts from the same compiler, and this release signs
+    # DXIL internally, without the dxil.dll validator (docs/DXC-PROVENANCE.md).
+    if(WIN32)
+        set(SBK_DXC_REDIST_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/dxc-redist/v1.8.2505.1/bin/x64")
+        if(NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxc.exe" OR NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxcompiler.dll")
+            message(FATAL_ERROR "Pinned DirectX Shader Compiler release missing. Run: python scripts/bootstrap.py --only dxc")
+        endif()
+        set(RT64_DXC_EXECUTABLE "${SBK_DXC_REDIST_DIR}/dxc.exe")
+    endif()
+
     add_subdirectory(
         "${RT64_DIR}"
         "${CMAKE_BINARY_DIR}/rt64"
@@ -346,7 +361,7 @@ if(SBK_BUILD_RENDERER_STACK)
     set(DXC_GS_OPTS "${DXC_COMMON_OPTS}" "-E" "GSMain" "-T" "gs_6_0")
 
     if(WIN32)
-        set(DXC "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+        set(DXC "${RT64_DXC_EXECUTABLE}")
     elseif(APPLE)
         if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
             set(DXC
@@ -587,28 +602,23 @@ if(SBK_BUILD_NATIVE_BOOT)
         set_property(TARGET SnowboardKidsEngine APPEND PROPERTY LINK_DEPENDS "${SBK_ENGINE_DEF}")
 
         # Runtime DLLs the executables load at startup: SDL2 (imported target)
-        # and the DirectX shader compiler, which rt64 links by import library.
-        # DXC comes from the pinned official Microsoft release (scripts/dxc_redist.py),
-        # not RT64's contrib copy, whose dxcompiler.dll has no verifiable
-        # provenance (docs/DXC-PROVENANCE.md). Release staging re-derives the
-        # set from the PE imports and checks the DXC hashes.
-        set(SBK_DXC_REDIST_DIR "${CMAKE_SOURCE_DIR}/.deps-renderer/dxc-redist/v1.7.2308/bin/x64")
-        if(NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxcompiler.dll" OR NOT EXISTS "${SBK_DXC_REDIST_DIR}/dxil.dll")
-            message(FATAL_ERROR "Pinned DirectX Shader Compiler release missing. Run: python scripts/bootstrap.py --only dxc")
-        endif()
+        # and dxcompiler.dll from the pinned DXC release (SBK_DXC_REDIST_DIR,
+        # above), which rt64 links by import library. No dxil.dll: this release
+        # never loads it. Release staging re-derives the set from the PE
+        # imports and checks the DXC hash.
         foreach(SBK_EXE ${SBK_APP_TARGETS})
             add_custom_command(TARGET ${SBK_EXE} POST_BUILD
                 COMMAND "${CMAKE_COMMAND}" -E copy_if_different
                     $<TARGET_RUNTIME_DLLS:${SBK_EXE}>
                     "${SBK_DXC_REDIST_DIR}/dxcompiler.dll"
-                    "${SBK_DXC_REDIST_DIR}/dxil.dll"
                     "$<TARGET_FILE_DIR:${SBK_EXE}>"
                 COMMAND_EXPAND_LISTS)
         endforeach()
 
-        # ROM-free probe of RT64's run-time DXIL compile+link path. It runs from
-        # its own directory holding dxcompiler.dll but no dxil.dll, so it shows
-        # whether the pinned compiler needs the validator (tests/renderer/).
+        # ROM-free gate on RT64's run-time DXIL compile+link path: from its own
+        # directory (dxcompiler.dll, no dxil.dll) it links RT64's shaders like
+        # RasterShader does, verifies they are hashed, that D3D12 (WARP) accepts
+        # them and that dxil.dll never loads (tests/renderer/dxc_runtime_probe.cpp).
         add_executable(SnowboardKidsDxcRuntimeProbe tests/renderer/dxc_runtime_probe.cpp)
         set_target_properties(SnowboardKidsDxcRuntimeProbe PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/dxc-probe")
@@ -626,6 +636,8 @@ if(SBK_BUILD_NATIVE_BOOT)
                 "${SBK_DXC_REDIST_DIR}/dxcompiler.dll"
                 "$<TARGET_FILE_DIR:SnowboardKidsDxcRuntimeProbe>"
             COMMAND_EXPAND_LISTS)
+        add_test(NAME renderer_dxc_runtime
+            COMMAND SnowboardKidsDxcRuntimeProbe "${CMAKE_BINARY_DIR}/dxc-probe/out")
     endif()
 
     add_executable(SnowboardKidsFirstRunUITest
