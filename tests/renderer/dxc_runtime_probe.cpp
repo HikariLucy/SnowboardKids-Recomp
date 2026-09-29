@@ -185,8 +185,9 @@ struct TrivialShaders {
     std::vector<uint8_t> vs, psCompiled, psLinked;
 };
 
-// WARP on the CI runners supports shader model 6.2, so these use 6.2 profiles
-// (RT64 itself uses lib_6_3 -> vs/ps_6_3); signing is the same code path.
+// WARP on the CI runners supports shader model 6.2, so the pipelines use 6.2
+// (libraries stay lib_6_3, the lowest validated library profile; RT64 links
+// them into vs/ps_6_3). Hashing is the same code path.
 TrivialShaders compileTrivial(const RT64::ShaderCompiler &compiler, const std::filesystem::path &out) {
     TrivialShaders shaders;
     shaders.vs = compileText(compiler, TrivialVS, L"VSMain", L"vs_6_2");
