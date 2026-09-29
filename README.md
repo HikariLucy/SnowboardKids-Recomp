@@ -171,7 +171,7 @@ The game has been played through full races with keyboard and a physical control
 
 The Windows ROM-free suite, MSVC/clang-cl Controller Pak tests, RT64, RecompFrontend and D3D12/VSync code all compile and pass in GitHub Actions.
 
-A live Windows gameplay validation is still required before a Windows binary is described as fully verified.
+Windows is **in development**: CI also builds the ROM-free `SnowboardKidsEngine.exe` and exercises the Windows game-module binding with a synthetic module. No Windows release exists yet; a live Windows gameplay validation is still required before Windows is described as supported. Status and build notes: [`docs/WINDOWS.md`](docs/WINDOWS.md).
 
 ## Project scope
 
