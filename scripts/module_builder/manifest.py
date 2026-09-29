@@ -34,6 +34,7 @@ def generate_manifest_data(
         "hle_count": extracted_metadata.get("hle_count", 56),
         "entrypoint_address": extracted_metadata.get("entrypoint_address", "0x80000400"),
         "continuation_count": extracted_metadata.get("continuation_count", 1981),
+        "validation": extracted_metadata.get("validation", "abi"),
     }
     return manifest
 

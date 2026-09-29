@@ -190,6 +190,13 @@ The release notes must retain the RecompFrontend licensing disclosure.
 
 ## Windows status
 
-Windows ROM-free CI and renderer/D3D12 compile validation are available, but a
-Windows gameplay binary has not yet received live validation. Do not label
-Windows as fully supported until that test is performed.
+Windows is **in development**, not supported. Hosted CI builds the ROM-free
+`SnowboardKidsEngine.exe` (`SBK_ENGINE_ONLY=ON`, `windows-engine` job), checks
+its `--version` against HEAD, lists its DLL dependencies, runs the synthetic
+module probe and uploads an engine-only draft archive. The Windows game module
+path and packaging (`scripts/package-beta-windows.py`) exist but a real
+`SnowboardKidsGame.dll` and a live gameplay test are still missing. The only
+DirectX Shader Compiler file shipped is `dxcompiler.dll` from a SHA-256-pinned
+official Microsoft release (v1.8.2505.1), with its license texts; the validator
+`dxil.dll` is neither needed nor shipped (`docs/DXC-PROVENANCE.md`). See `docs/WINDOWS.md` for the level-by-level status and the live
+validation checklist. Do not label Windows as supported until that test passes.

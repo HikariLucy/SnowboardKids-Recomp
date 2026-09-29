@@ -5,7 +5,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from .errors import MissingCompilerError
 
@@ -29,23 +29,32 @@ class Toolchain:
     def is_msvc_like(self) -> bool:
         return self.flavor in (ToolchainFlavor.MSVC, ToolchainFlavor.CLANG_CL)
 
-    def get_compile_command(self, src: Path, obj: Path, include_dirs: List[Path]) -> List[str]:
-        """Generate command to compile one source file into an object file."""
+    def get_compile_command(self, src: Path, obj: Path, include_dirs: List[Path],
+                            defines: Sequence[str] = ()) -> List[str]:
+        """Generate command to compile one source file into an object file.
+
+        Generated CPU units are .c files holding C++ continuation code; every
+        flavor compiles them as C++ (g++/clang++ do so by driver name).
+        """
         if self.is_msvc_like():
             cmd = [
                 str(self.executable),
                 "/nologo",
+                "/TP",
                 "/std:c++20",
                 "/O2",
                 "/W3",
                 "/EHsc",
                 "/MD",
-                "/c",
-                str(src),
-                f"/Fo:{obj}"
             ]
+            if self.flavor == ToolchainFlavor.CLANG_CL:
+                # Same RSP vector ISA as the GCC/Clang build; MSVC needs no flag.
+                cmd.extend(["/clang:-mssse3", "/clang:-msse4.1", "-Wno-unused-variable"])
+            cmd.extend(["/c", str(src), f"/Fo:{obj}"])
             for inc in include_dirs:
                 cmd.append(f"/I{inc}")
+            for define in defines:
+                cmd.append(f"/D{define}")
             return cmd
         else:
             cmd = [
@@ -65,18 +74,32 @@ class Toolchain:
             ]
             for inc in include_dirs:
                 cmd.append(f"-I{inc}")
+            for define in defines:
+                cmd.append(f"-D{define}")
             return cmd
 
-    def get_link_command(self, obj_files: List[Path], out_dll: Path) -> List[str]:
+    def get_prefix_map_args(self, old: Path, new: Path) -> List[str]:
+        """Arguments that keep `old` out of embedded __FILE__ strings."""
+        if self.flavor == ToolchainFlavor.MSVC:
+            return [f"/pathmap:{old}={new}"]
+        if self.flavor == ToolchainFlavor.CLANG_CL:
+            # clang-cl has no /pathmap and would read it as an input file.
+            return [f"/clang:-ffile-prefix-map={old}={new}"]
+        return [f"-ffile-prefix-map={old}={new}"]
+
+    def get_link_command(self, obj_files: List[Path], out_dll: Path,
+                         libraries: Sequence[Path] = ()) -> List[str]:
         """Generate command to link object files into a shared library (.so or .dll)."""
         if self.is_msvc_like():
             cmd = [
                 str(self.executable),
                 "/nologo",
                 "/LD",
+                "/MD",
                 f"/Fe:{out_dll}"
             ]
             cmd.extend(str(obj) for obj in obj_files)
+            cmd.extend(str(lib) for lib in libraries)
             return cmd
         else:
             cmd = [
@@ -86,7 +109,33 @@ class Toolchain:
                 str(out_dll)
             ]
             cmd.extend(str(obj) for obj in obj_files)
+            cmd.extend(str(lib) for lib in libraries)
             return cmd
+
+    def find_librarian(self) -> Path:
+        """lib.exe or llvm-lib, used to turn a .def export list into an import library."""
+        candidates = []
+        if self.flavor == ToolchainFlavor.CLANG_CL:
+            candidates.extend([self.executable.parent / "llvm-lib.exe", self.executable.parent / "llvm-lib"])
+        else:
+            candidates.append(self.executable.parent / "lib.exe")
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        for name in ("lib.exe", "lib", "llvm-lib.exe", "llvm-lib"):
+            found = shutil.which(name)
+            if found:
+                return Path(found)
+        raise MissingCompilerError(
+            "No import librarian (lib.exe or llvm-lib) was found next to the compiler or on PATH.\n"
+            "Run the builder from a Visual Studio Developer Command Prompt."
+        )
+
+    def get_import_library_command(self, def_file: Path, out_lib: Path,
+                                   librarian: Optional[Path] = None) -> List[str]:
+        """Command creating an x64 import library from a module-definition file."""
+        tool = librarian or self.find_librarian()
+        return [str(tool), "/nologo", "/machine:x64", f"/def:{def_file}", f"/out:{out_lib}"]
 
 
 def inspect_compiler_flavor(path: Path) -> Tuple[str, str]:
@@ -135,7 +184,9 @@ def discover_toolchain(explicit_cxx: Optional[str] = None) -> Toolchain:
         candidates.append(env_cxx.strip())
 
     if sys.platform == "win32":
-        candidates.extend(["clang-cl.exe", "clang-cl", "cl.exe", "cl", "g++.exe", "g++"])
+        # The module shares the engine's MSVC ABI and C runtime, so MinGW g++
+        # is not a candidate on Windows.
+        candidates.extend(["clang-cl.exe", "clang-cl", "cl.exe", "cl"])
     else:
         candidates.extend(["clang++", "g++", "c++"])
 
@@ -151,10 +202,10 @@ def discover_toolchain(explicit_cxx: Optional[str] = None) -> Toolchain:
         err_msg = (
             "No C++ compiler was discovered on your Windows system.\n"
             "To build the game module locally, please install:\n"
-            "  1. Visual Studio Build Tools (with C++ Desktop workload), or\n"
-            "  2. LLVM / Clang (clang-cl), or\n"
-            "  3. MinGW-w64 (g++).\n"
-            "Ensure the compiler binary is added to your PATH or set CXX."
+            "  1. LLVM / Clang (clang-cl, recommended), or\n"
+            "  2. Visual Studio Build Tools (with C++ Desktop workload).\n"
+            "Run from a Developer Command Prompt so lib.exe and the Windows SDK are available,\n"
+            "or set CXX to the compiler path."
         )
     else:
         err_msg = (

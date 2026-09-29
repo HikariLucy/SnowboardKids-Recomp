@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 from dependency_lock import DEPENDENCIES
+import dxc_redist
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -40,13 +41,19 @@ def ensure(name, root=ROOT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--only', choices=DEPENDENCIES, action='append')
+    # 'dxc' is the pinned Microsoft DXC release archive (Windows runtime DLLs),
+    # not a Git checkout; it is fetched by default only on Windows.
+    parser.add_argument('--only', choices=[*DEPENDENCIES, 'dxc'], action='append')
     args = parser.parse_args()
-    names = list(dict.fromkeys(args.only or DEPENDENCIES))
+    default = [*DEPENDENCIES] + (['dxc'] if sys.platform == 'win32' else [])
+    names = list(dict.fromkeys(args.only or default))
     try:
         for name in names:
-            ensure(name)
-        patched = [name for name in names if DEPENDENCIES[name].patches]
+            if name == 'dxc':
+                dxc_redist.fetch()
+            else:
+                ensure(name)
+        patched = [name for name in names if name in DEPENDENCIES and DEPENDENCIES[name].patches]
         if patched:
             run(sys.executable, str(ROOT / 'scripts/dependency_patches.py'),
                 *[value for name in patched for value in ('--only', name)])

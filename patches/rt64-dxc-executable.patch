@@ -1,0 +1,46 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 534776f..affd2b1 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -36,15 +36,24 @@ function(preprocess INFILE OUTFILE OPTIONS)
+ endfunction()
+ 
+ if (WIN32)
+-    set (DXC "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
++    # A parent project may pass the DXC release it ships (RT64_DXC_EXECUTABLE).
++    # The run-time IDxcLinker refuses libraries from a different compiler
++    # version, so build-time library shaders must come from that same release.
++    if (RT64_DXC_EXECUTABLE)
++        set (DXC "${RT64_DXC_EXECUTABLE}")
++    else()
++        set (DXC "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
++    endif()
+     add_compile_definitions(
+         NOMINMAX
+         __PRFCHWINTRIN_H
+     )
+ 
+-    # Dependencies that must be next to the DLL.
+-    configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxcompiler.dll" "dxcompiler.dll" COPYONLY)
+-    configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxil.dll" "dxil.dll" COPYONLY)
++    if (NOT RT64_DXC_EXECUTABLE)
++        # Dependencies that must be next to the DLL.
++        configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxcompiler.dll" "dxcompiler.dll" COPYONLY)
++        configure_file("${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxil.dll" "dxil.dll" COPYONLY)
++    endif()
+ elseif (APPLE)
+     if (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+         # find zlib and include in dyld path
+diff --git a/src/common/rt64_dynamic_libraries.cpp b/src/common/rt64_dynamic_libraries.cpp
+index 56b2b04..b7d890d 100644
+--- a/src/common/rt64_dynamic_libraries.cpp
++++ b/src/common/rt64_dynamic_libraries.cpp
+@@ -16,7 +16,7 @@ namespace RT64 {
+     typedef std::pair<std::string, bool> NameRequiredPair;
+     
+     const auto DynamicLibraryList = {
+-        NameRequiredPair("dxil.dll", true),
++        NameRequiredPair("dxil.dll", false),
+         NameRequiredPair("dxcompiler.dll", true),
+ #   if DLSS_ENABLED
+         NameRequiredPair("nvngx_dlssd.dll", false),

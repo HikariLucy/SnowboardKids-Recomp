@@ -13,7 +13,8 @@ You supply your own legally dumped **Snowboard Kids (USA)** ROM image
 ## 1. First run
 
 1. Extract the release archive.
-2. Run `./SnowboardKidsEngine`.
+2. Run `./SnowboardKidsEngine` (Linux) or `SnowboardKidsEngine.exe` (Windows
+   development builds only — Windows is not a supported release platform yet).
 3. Select your own supported Snowboard Kids (USA) ROM when prompted.
 4. The engine validates the ROM and the bundled game module, then starts the game.
 5. The selected ROM path is remembered in your user-data directory.
@@ -76,7 +77,7 @@ and has not been validated by the virtual-controller tests.
 
 ## 3. Host Requirements
 
-- **Graphics**: Vulkan 1.2+ capable GPU and drivers.
+- **Graphics**: Vulkan 1.2+ capable GPU and drivers (Linux); Direct3D 12 by default on Windows.
 - **Audio / Input**: SDL2 runtime libraries.
 - **Normal public-beta playback**: no compiler is required.
 - **Optional local module rebuilding**:

@@ -33,6 +33,12 @@ class ArtifactAuditTest(unittest.TestCase):
     def test_clean(self):
         self.check({})
 
+    def test_rom_derived_module_inputs(self):
+        for name in ('sbk-module-inputs.zip', 'corpus/funcs_12.c', 'scripts/funcs_0.c',
+                     'rsp/aspMain.cpp', 'src/lookup.cpp', 'recomp_overlays.inl'):
+            with self.subTest(name=name):
+                self.check({'SnowboardKidsRecompiled/' + name: b'x'}, 'forbidden file')
+
     def test_missing_manifest(self):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'test.zip'

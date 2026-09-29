@@ -2,7 +2,7 @@
 
 # Snowboard Kids Recompiled
 
-**Native PC recompilation of Snowboard Kids (Nintendo 64)**  
+**Native PC recompilation of Snowboard Kids (Nintendo 64)**<br>
 Powered by **N64Recomp**, **RT64**, **RecompFrontend**, and **N64ModernRuntime**.
 
 [![Release](https://img.shields.io/github/v/release/HikariLucy/SnowboardKids-Recomp?include_prereleases&label=release)](https://github.com/HikariLucy/SnowboardKids-Recomp/releases)
@@ -35,7 +35,7 @@ This is **not an emulator distribution** and the repository does not provide the
 | Platform | Status | Notes |
 | --- | --- | --- |
 | **Linux x86_64** | ✅ Public beta | Live gameplay validated and downloadable as <code>v0.9.0-beta</code> |
-| **Windows x86_64** | 🚧 In progress | ROM-free CI and renderer/D3D12 compilation pass; live gameplay/package validation is still pending |
+| **Windows x86_64** | 🚧 In progress | ROM-free engine and module-binding infrastructure validated in CI; real game-module and live gameplay validation pending. No Windows download yet — see [docs/WINDOWS.md](docs/WINDOWS.md) |
 
 The Linux beta has been validated in real play sessions, including:
 
@@ -48,6 +48,8 @@ The Linux beta has been validated in real play sessions, including:
 - Controller remapping and persistence
 - Master Volume and accessibility settings
 - Controller Pak persistence
+
+Windows x86_64 is **in development**. CI builds the ROM-free <code>SnowboardKidsEngine.exe</code> with clang-cl (RT64, RecompFrontend and N64ModernRuntime included) and verifies the engine ↔ game-module binding with a synthetic module. The real <code>SnowboardKidsGame.dll</code>, a complete Windows package and live Windows gameplay have **not** been validated yet, so there is no Windows release. Progress and developer build notes: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ## Quick start
 
@@ -188,6 +190,7 @@ Savestates intentionally do **not** rewind Controller Pak storage. The original 
 
 ### In progress
 
+- [ ] Windows x86_64: real game-module (<code>SnowboardKidsGame.dll</code>) build and validation
 - [ ] Windows x86_64 distributable build
 - [ ] Live Windows gameplay validation
 - [ ] Broader full-game QA
@@ -221,6 +224,7 @@ For detailed build requirements and developer workflows:
 - [Release engineering](docs/RELEASE-ENGINEERING.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Current status](docs/STATUS.md)
+- [Windows development status](docs/WINDOWS.md)
 
 Public CI is ROM-free and never uploads or stores a commercial ROM.
 
@@ -274,6 +278,7 @@ Before redistributing a binary build, see:
 - [Running the game](RUNNING.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Current status](docs/STATUS.md)
+- [Windows development status](docs/WINDOWS.md)
 - [Release engineering](docs/RELEASE-ENGINEERING.md)
 - [Controller Pak persistence](docs/CONTROLLER-PAK-PERSISTENCE.md)
 - [Original save-data map](docs/SAVE-DATA-MAP.md)

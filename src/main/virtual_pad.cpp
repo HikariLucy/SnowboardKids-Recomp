@@ -7,7 +7,7 @@
 #include <sstream>
 #include <string>
 
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "recompinput/players.h"
 #include "recompinput/input_state.h"
 

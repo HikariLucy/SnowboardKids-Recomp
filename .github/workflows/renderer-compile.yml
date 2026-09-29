@@ -1,10 +1,11 @@
 name: Renderer stack compile (ROM-free)
 # Compiles the pinned RT64 / RecompFrontend / N64ModernRuntime stack with the
-# canonical patch series on Windows (D3D12 and Vulkan backends). No ROM,
-# no ROM-derived code, no packaging: SBK_RENDERER_COMPILE_CI is CI-only.
+# canonical patch series on Windows (D3D12 and Vulkan backends), and builds the
+# ROM-free SnowboardKidsEngine.exe (SBK_ENGINE_ONLY). No ROM, no ROM-derived
+# code and no game module ever reach this workflow.
 on:
   push:
-    branches: [main, release/v0.9.0-beta, feat/vsync-presentation]
+    branches: [main, release/v0.9.0-beta, feat/vsync-presentation, feat/windows-release]
   workflow_dispatch:
 jobs:
   windows:
@@ -22,8 +23,8 @@ jobs:
         run: choco install ninja
       - name: Configure Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Bootstrap pinned dependencies and canonical patches
-        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme
+      - name: Bootstrap pinned dependencies, canonical patches and the DXC release
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme --only dxc
       - name: Configure renderer stack (clang-cl, as upstream RT64)
         run: cmake -S . -B build-rci -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DSBK_RENDERER_COMPILE_CI=ON -DSBK_BUILD_RENDERER_STACK=ON
       - name: Build RT64, RecompFrontend and runtime config
@@ -52,5 +53,138 @@ jobs:
           $id = & build-pfs-clangcl/SnowboardKidsControllerPakTest.exe --compiler
           "Controller Pak test built by: $id"
           if ($id -notmatch '^ClangCl ') { throw "expected clang-cl, got: $id" }
+      - name: Diff check
+        run: git diff --check
+
+  windows-engine:
+    runs-on: windows-2022
+    timeout-minutes: 150
+    steps:
+      - name: Keep LF checkouts
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Ninja
+        run: choco install ninja
+      - name: Configure Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Bootstrap pinned dependencies, canonical patches and the DXC release
+        run: python scripts/bootstrap.py --only runtime --only rt64 --only frontend --only theme --only dxc
+      - name: RT64 must not require dxil.dll at start-up
+        shell: pwsh
+        run: |
+          $src = Get-Content .deps-renderer/rt64/src/common/rt64_dynamic_libraries.cpp -Raw
+          if ($src -match 'NameRequiredPair\("dxil\.dll",\s*true\)') { throw "RT64 requires dxil.dll: the pinned DXC signs shaders itself" }
+          if ($src -notmatch 'NameRequiredPair\("dxil\.dll",\s*false\)') { throw "RT64 no longer lists dxil.dll as optional" }
+      - name: Configure ROM-free engine (clang-cl, engine-only)
+        run: >-
+          cmake -S . -B build-engine -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl
+          -DSBK_RENDERER_COMPILE_CI=ON -DSBK_BUILD_RENDERER_STACK=ON
+          -DSBK_BUILD_NATIVE_BOOT=ON -DSBK_ENGINE_ONLY=ON -DSBK_CONTINUATIONS=ON
+      - name: Build SnowboardKidsEngine.exe
+        run: cmake --build build-engine --target SnowboardKidsEngine
+      - name: Engine version
+        shell: pwsh
+        run: |
+          $expected = (git rev-parse --short=12 HEAD).Trim()
+          $out = (& build-engine/SnowboardKidsEngine.exe --version) -join "`n"
+          if ($LASTEXITCODE -ne 0) { throw "--version exited with $LASTEXITCODE" }
+          $out
+          if ($out -notmatch '(?m)^Snowboard Kids Recompiled 0\.9\.0$') { throw "unexpected version banner" }
+          if ($out -notmatch "(?m)^commit $expected$") { throw "engine commit does not match HEAD $expected" }
+      - name: Engine runtime dependencies and exports
+        shell: pwsh
+        run: |
+          dumpbin /nologo /dependents build-engine/SnowboardKidsEngine.exe
+          Get-ChildItem build-engine -Filter *.dll | ForEach-Object {
+            dumpbin /nologo /dependents $_.FullName
+          }
+          dumpbin /nologo /exports build-engine/SnowboardKidsEngine.exe
+      - name: Build engine-only tests
+        run: cmake --build build-engine
+      - name: Engine-only tests (includes synthetic module probe)
+        run: ctest --test-dir build-engine --output-on-failure -V
+      - name: Every shader is compiled by the pinned DXC release
+        run: python tests/release/dxc_release_compat.py --build build-engine --expect-pinned
+      - name: No dxil.dll dependency (imports, build output)
+        shell: pwsh
+        run: |
+          foreach ($image in 'build-engine/SnowboardKidsEngine.exe', 'build-engine/dxcompiler.dll',
+                             'build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe') {
+            $deps = (dumpbin /nologo /dependents $image) -join "`n"
+            if ($deps -match '(?i)dxil\.dll') { throw "$image depends on dxil.dll" }
+          }
+          foreach ($dir in 'build-engine', 'build-engine/dxc-probe', '.deps-renderer/dxc-redist') {
+            $found = Get-ChildItem $dir -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue
+            if ($found) { throw "dxil.dll present: $($found.FullName)" }
+          }
+          "no dxil.dll imported by the engine, dxcompiler.dll or the probe; none staged"
+      - name: RT64 run-time DXIL with no dxil.dll anywhere on the search path
+        shell: pwsh
+        run: |
+          # Drop every PATH entry holding a dxil.dll (the Developer prompt adds
+          # the Windows SDK's); System32 and the probe directory hold none.
+          $dirs = $env:PATH -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'dxil.dll')) }
+          $env:PATH = $dirs -join ';'
+          if (Test-Path "$env:WINDIR\System32\dxil.dll") { throw "System32 has a dxil.dll: cannot prove its absence" }
+          if (Test-Path build-engine/dxc-probe/dxil.dll) { throw "probe directory has a dxil.dll" }
+          $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-clean --require-no-validator --control-load
+          $code = $LASTEXITCODE
+          $out
+          if ($code -ne 0) { throw "run-time DXIL path failed without dxil.dll" }
+          if (-not ($out -match '^control: LoadLibraryW\(dxil\.dll\) now: not found on the search path$')) { throw "a dxil.dll was still findable" }
+          python tests/release/dxil_hash.py (Get-ChildItem probe-clean/*.dxil).FullName
+          if ($LASTEXITCODE -ne 0) { throw "run-time containers are not retail-hashed" }
+      - name: A user-installed dxil.dll (Windows SDK) does not break the run-time path
+        shell: pwsh
+        run: |
+          $sdks = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue |
+            Where-Object FullName -match '\\x64\\' | Sort-Object FullName
+          if (-not $sdks) { throw "no Windows SDK dxil.dll found" }
+          $base = $env:PATH
+          foreach ($decoy in @($sdks[0], $sdks[-1]) | Select-Object -Unique) {
+            "=== $($decoy.FullName) first on PATH"
+            $env:PATH = "$($decoy.DirectoryName);$base"
+            $dir = "probe-sdk-" + ($decoy.Directory.Parent.Name)
+            $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe $dir --control-load
+            $code = $LASTEXITCODE
+            $out
+            if ($code -ne 0) { throw "run-time DXIL path failed with $($decoy.FullName) on PATH" }
+            python tests/release/dxil_hash.py (Get-ChildItem "$dir/*.dxil").FullName
+            if ($LASTEXITCODE -ne 0) { throw "containers not retail-hashed with $($decoy.FullName) on PATH" }
+          }
+      - name: Stage ROM-free engine draft package
+        run: python scripts/package-beta-windows.py --engine build-engine/SnowboardKidsEngine.exe --engine-only-draft --out-dir dist-windows
+      - name: Draft carries the pinned DXC and its notices, and no dxil.dll
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist-windows -Filter *-engine-draft.zip | Select-Object -First 1
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          $names = $archive.Entries.FullName
+          $read = { param($n) $s = $archive.GetEntry("SnowboardKidsRecompiled/$n").Open(); (New-Object IO.StreamReader($s)).ReadToEnd() }
+          $info = & $read 'BUILD-INFO.txt'; $dlls = & $read 'RUNTIME-DLLS.txt'
+          $archive.Dispose()
+          $info; $dlls
+          foreach ($n in 'dxcompiler.dll', 'licenses/DirectXShaderCompiler-LICENSE-LLVM.txt',
+                   'licenses/DirectXShaderCompiler-LICENSE.txt', 'licenses/DirectXShaderCompiler-ThirdPartyNotices.txt',
+                   'RUNTIME-DLLS.txt', 'licenses/SDL2.txt') {
+            if ("SnowboardKidsRecompiled/$n" -notin $names) { throw "draft is missing $n" }
+          }
+          # The pinned DXC signs shaders itself: its validator is never shipped.
+          if ($names -match '(?i)dxil\.dll$|LICENSE-MS') { throw "draft contains dxil.dll or its license" }
+          if ($info -notmatch 'Package: draft \(not a release candidate') { throw "draft not labelled as draft" }
+          if ($dlls -notmatch 'sha256: 5888d3e590f5bfd8743484e7f31313996734adec5741506271a5c6368cbe8ba9') { throw "dxcompiler.dll is not the pinned release" }
+          python scripts/audit_release_artifact.py $zip.FullName
+          if ($LASTEXITCODE -ne 0) { throw "artifact audit failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SnowboardKidsEngine-Windows-x86_64-draft
+          path: dist-windows/*.zip
+          retention-days: 14
+          if-no-files-found: error
       - name: Diff check
         run: git diff --check

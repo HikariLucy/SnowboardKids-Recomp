@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 from .errors import CompileError, LinkError
 from .toolchain import Toolchain
@@ -20,7 +20,9 @@ def compile_sources_to_shared_library(
     workspace_dir: Path,
     jobs: int = 4,
     progress_callback: Optional[Callable[[int, int, str], None]] = None,
-    source_root: Optional[Path] = None
+    source_root: Optional[Path] = None,
+    source_defines: Optional[Dict[Path, Sequence[str]]] = None,
+    link_libraries: Sequence[Path] = ()
 ) -> float:
     """
     Compiles all sources into object files in parallel, then links them into out_library.
@@ -44,7 +46,8 @@ def compile_sources_to_shared_library(
             obj_name = f"{src.stem}_{hashlib.md5(str(src).encode()).hexdigest()[:6]}.obj"
         obj_path = workspace_dir / obj_name
 
-        cmd = toolchain.get_compile_command(src, obj_path, include_dirs)
+        cmd = toolchain.get_compile_command(src, obj_path, include_dirs,
+                                            (source_defines or {}).get(src, ()))
 
         # Keep developer home/temp paths out of the distributable module. The
         # generated corpus and RSP sources are compiled from absolute paths,
@@ -55,12 +58,8 @@ def compile_sources_to_shared_library(
         if source_root is not None:
             prefix_maps.append((source_root.resolve(), Path(".")))
         prefix_maps.append((workspace_dir.parent.resolve(), Path(".module-build")))
-        if toolchain.is_msvc_like():
-            for old, new in prefix_maps:
-                cmd.insert(1, f"/pathmap:{old}={new}")
-        else:
-            for old, new in prefix_maps:
-                cmd.insert(1, f"-ffile-prefix-map={old}={new}")
+        for old, new in prefix_maps:
+            cmd[1:1] = toolchain.get_prefix_map_args(old, new)
 
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode != 0:
@@ -87,7 +86,9 @@ def compile_sources_to_shared_library(
                 raise CompileError(f"Error compiling {src.name}: {e}")
 
     # Linking step
-    link_cmd = toolchain.get_link_command(obj_files, out_library)
+    # Sorted objects keep the link order, and so the module bytes, independent
+    # of which compile job finished first.
+    link_cmd = toolchain.get_link_command(sorted(obj_files), out_library, link_libraries)
     link_res = subprocess.run(link_cmd, capture_output=True, text=True)
     if link_res.returncode != 0:
         raise LinkError(

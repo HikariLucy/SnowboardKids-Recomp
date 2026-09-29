@@ -27,7 +27,7 @@ DEPENDENCIES = {
     'rt64': Dependency('.deps-renderer/rt64', 'https://github.com/cdlewis/rt64.git',
         '6a4166b2cfa952d931a08481d1037da995f28b54',
         ('rt64-quiescence.patch', 'rt64-aspect-coverage.patch',
-         'rt64-vsync-presentation.patch')),
+         'rt64-vsync-presentation.patch', 'rt64-dxc-executable.patch')),
     'frontend': Dependency('.deps-renderer/RecompFrontend',
         'https://github.com/cdlewis/RecompFrontend.git',
         'e85b912d9df677b04f9358867dd010c8af27ea05',
