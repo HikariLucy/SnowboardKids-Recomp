@@ -5,14 +5,16 @@
 // exactly that with RT64's own ShaderCompiler and generateShaderText, writes
 // the linked containers for tests/release/dxil_hash.py, and checks:
 //   - every variant compiles and links, and the result carries a hash;
-//   - dxcompiler.dll never loads dxil.dll (the separately licensed validator),
-//     even when one is on the search path (gate);
 //   - D3D12 on the WARP adapter accepts such shaders and rejects them with a
-//     zeroed or corrupted hash (controls), with and without the debug layer,
-//     reporting any OS component that loads dxil.dll meanwhile.
+//     zeroed or corrupted hash (controls), with and without the debug layer;
+//   - whether dxil.dll (the separately licensed validator) got loaded, and by
+//     which phase.
 //
 //   SnowboardKidsDxcRuntimeProbe <out-dir> [--report-only] [--control-load]
+//                                [--require-no-validator]
 //
+// --require-no-validator fails if dxil.dll was loaded before D3D12 was used:
+// run it with no dxil.dll findable to prove the path needs none.
 // --control-load finally calls LoadLibraryW(L"dxil.dll") to show whether a
 // validator was findable on the search path during the run.
 #include <windows.h>
@@ -271,16 +273,19 @@ void runWarp(const TrivialShaders &shaders, bool debugLayer) {
 int main(int argc, char **argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0); // keep output ordered in CI logs
     if (argc < 2) {
-        std::fprintf(stderr, "usage: %s <out-dir> [--report-only] [--control-load]\n", argv[0]);
+        std::fprintf(stderr, "usage: %s <out-dir> [--report-only] [--control-load] [--require-no-validator]\n",
+                     argv[0]);
         return 2;
     }
     const std::filesystem::path out = argv[1];
     std::filesystem::create_directories(out);
     bool reportOnly = false;
     bool controlLoad = false;
+    bool requireNoValidator = false;
     for (int i = 2; i < argc; i++) {
         reportOnly |= std::strcmp(argv[i], "--report-only") == 0;
         controlLoad |= std::strcmp(argv[i], "--control-load") == 0;
+        requireNoValidator |= std::strcmp(argv[i], "--require-no-validator") == 0;
     }
 
     std::printf("VERS RasterVSLibrary (build time): %s\n",
@@ -316,11 +321,13 @@ int main(int argc, char **argv) {
         check(index == 4, "all RT64 runtime compile+link variants succeed");
         const TrivialShaders shaders = compileTrivial(compiler, out);
 
-        // Everything DXC does in the engine is done by now: the compiler must
-        // not have loaded the validator, even when one is on the search path.
+        // Everything DXC does in the engine is done by now. When a dxil.dll is
+        // findable (e.g. a Windows SDK on PATH), dxcompiler.dll may load it
+        // to query its version; --require-no-validator runs with none
+        // findable and proves the whole path works without it.
         const std::wstring dxil = modulePath(L"dxil.dll");
         std::wprintf(L"dxil.dll loaded by the shader compiler: %ls\n", dxil.empty() ? L"no" : dxil.c_str());
-        check(dxil.empty(), "dxcompiler.dll never loaded dxil.dll");
+        if (requireNoValidator) check(dxil.empty(), "dxcompiler.dll ran without dxil.dll");
 
         // D3D12 then checks the hashes. Which OS components it loads is
         // reported, not gated: none of them ships with the game.

@@ -116,23 +116,40 @@ jobs:
             if ($found) { throw "dxil.dll present: $($found.FullName)" }
           }
           "no dxil.dll imported by the engine, dxcompiler.dll or the probe; none staged"
-      - name: RT64 run-time DXIL without dxil.dll, with a validator on PATH as a decoy
+      - name: RT64 run-time DXIL with no dxil.dll anywhere on the search path
         shell: pwsh
         run: |
-          $decoy = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue |
-            Where-Object FullName -match '\\x64\\' | Select-Object -First 1
-          if (-not $decoy) { throw "no Windows SDK dxil.dll found to use as a decoy" }
-          "decoy validator first on PATH: $($decoy.FullName)"
-          $env:PATH = "$($decoy.DirectoryName);$env:PATH"
-          Get-ChildItem build-engine/dxc-probe -Filter *.dll | Select-Object Name, Length | Format-Table | Out-String
-          $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-out --control-load
+          # Drop every PATH entry holding a dxil.dll (the Developer prompt adds
+          # the Windows SDK's); System32 and the probe directory hold none.
+          $dirs = $env:PATH -split ';' | Where-Object { $_ -and -not (Test-Path (Join-Path $_ 'dxil.dll')) }
+          $env:PATH = $dirs -join ';'
+          if (Test-Path "$env:WINDIR\System32\dxil.dll") { throw "System32 has a dxil.dll: cannot prove its absence" }
+          if (Test-Path build-engine/dxc-probe/dxil.dll) { throw "probe directory has a dxil.dll" }
+          $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe probe-clean --require-no-validator --control-load
           $code = $LASTEXITCODE
           $out
-          if ($code -ne 0) { throw "run-time DXIL probe failed" }
-          if (-not ($out -match '^dxil\.dll loaded by the shader compiler: no$')) { throw "dxcompiler.dll loaded dxil.dll" }
-          if (-not ($out -match '^control: LoadLibraryW\(dxil\.dll\) now: .+dxil\.dll$')) { throw "decoy was not loadable: the absence check proved nothing" }
-          python tests/release/dxil_hash.py (Get-ChildItem probe-out/*.dxil).FullName
+          if ($code -ne 0) { throw "run-time DXIL path failed without dxil.dll" }
+          if (-not ($out -match '^control: LoadLibraryW\(dxil\.dll\) now: not found on the search path$')) { throw "a dxil.dll was still findable" }
+          python tests/release/dxil_hash.py (Get-ChildItem probe-clean/*.dxil).FullName
           if ($LASTEXITCODE -ne 0) { throw "run-time containers are not retail-hashed" }
+      - name: A user-installed dxil.dll (Windows SDK) does not break the run-time path
+        shell: pwsh
+        run: |
+          $sdks = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter dxil.dll -ErrorAction SilentlyContinue |
+            Where-Object FullName -match '\\x64\\' | Sort-Object FullName
+          if (-not $sdks) { throw "no Windows SDK dxil.dll found" }
+          $base = $env:PATH
+          foreach ($decoy in @($sdks[0], $sdks[-1]) | Select-Object -Unique) {
+            "=== $($decoy.FullName) first on PATH"
+            $env:PATH = "$($decoy.DirectoryName);$base"
+            $dir = "probe-sdk-" + ($decoy.Directory.Parent.Name)
+            $out = build-engine/dxc-probe/SnowboardKidsDxcRuntimeProbe.exe $dir --control-load
+            $code = $LASTEXITCODE
+            $out
+            if ($code -ne 0) { throw "run-time DXIL path failed with $($decoy.FullName) on PATH" }
+            python tests/release/dxil_hash.py (Get-ChildItem "$dir/*.dxil").FullName
+            if ($LASTEXITCODE -ne 0) { throw "containers not retail-hashed with $($decoy.FullName) on PATH" }
+          }
       - name: Stage ROM-free engine draft package
         run: python scripts/package-beta-windows.py --engine build-engine/SnowboardKidsEngine.exe --engine-only-draft --out-dir dist-windows
       - name: Draft carries the pinned DXC and its notices, and no dxil.dll
