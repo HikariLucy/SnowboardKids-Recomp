@@ -123,6 +123,8 @@ if(SBK_ROM_FREE_CI)
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_version.py")
     add_test(NAME release_readiness
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_readiness.py")
+    add_test(NAME release_windows_package
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_windows_package.py")
     return()
 endif()
 

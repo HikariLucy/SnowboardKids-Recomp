@@ -14,7 +14,9 @@ available dependency license texts and `SOURCE-COMPLIANCE.md`.
 | N64Recomp | `.deps/N64Recomp/LICENSE` | MIT; notice included |
 | RT64 | `.deps-renderer/rt64/LICENSE` | MIT; notice included |
 | RecompFrontend | No top-level LICENSE file in pinned tree | **PENDING UPSTREAM CLARIFICATION**: issue #44 is open; the beta proceeds with this uncertainty explicitly disclosed |
-| SDL2 | Dynamically linked (`libSDL2-2.0.so.0` / `SDL2.dll`) | zlib license; system/runtime dependency |
+| SDL2 | Dynamically linked (`libSDL2-2.0.so.0` / `SDL2.dll`); Windows `SDL2.dll` 2.26.3 from RT64's pinned `mupen64plus-win32-deps` | zlib license; Windows packages ship `licenses/SDL2.txt` from the pinned `COPYING.txt` |
+| DirectX Shader Compiler (`dxcompiler.dll`, `dxil.dll`) | Windows only: prebuilt binaries in RT64's pinned `src/contrib/dxc`; `rt64` links `dxcompiler.lib` | **PENDING REVIEW (Windows only)**: the pinned tree carries no license text for these binaries; `package-beta-windows.py` refuses a public Windows package until reviewed texts are added. Not part of the Linux release |
+| Microsoft Visual C++ runtime (`vcruntime140*.dll`, `msvcp140*.dll`) | Windows only, if the engine/module import them | Microsoft Visual C++ Redistributable distributable code, deployed app-local from the build machine's `VCToolsRedistDir` |
 | {fmt} | `.deps/N64Recomp/lib/fmt/LICENSE` | MIT |
 | RmlUi | `.deps-renderer/RecompFrontend/recompui/lib/RmlUi/LICENSE.txt` | MIT |
 | toml++ | `.deps/N64Recomp/lib/tomlplusplus/LICENSE` | MIT |
