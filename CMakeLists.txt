@@ -605,6 +605,27 @@ if(SBK_BUILD_NATIVE_BOOT)
                     "$<TARGET_FILE_DIR:${SBK_EXE}>"
                 COMMAND_EXPAND_LISTS)
         endforeach()
+
+        # ROM-free probe of RT64's run-time DXIL compile+link path. It runs from
+        # its own directory holding dxcompiler.dll but no dxil.dll, so it shows
+        # whether the pinned compiler needs the validator (tests/renderer/).
+        add_executable(SnowboardKidsDxcRuntimeProbe tests/renderer/dxc_runtime_probe.cpp)
+        set_target_properties(SnowboardKidsDxcRuntimeProbe PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/dxc-probe")
+        target_compile_definitions(SnowboardKidsDxcRuntimeProbe PRIVATE NOMINMAX)
+        target_include_directories(SnowboardKidsDxcRuntimeProbe PRIVATE
+            "${RT64_DIR}/src" "${RT64_DIR}/src/contrib" "${RT64_DIR}/src/contrib/plume"
+            "${RT64_DIR}/src/contrib/hlslpp/include" "${RT64_DIR}/src/contrib/dxc/inc"
+            "${CMAKE_BINARY_DIR}/src")
+        target_link_directories(SnowboardKidsDxcRuntimeProbe PRIVATE
+            "${RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64")
+        target_link_libraries(SnowboardKidsDxcRuntimeProbe PRIVATE rt64 d3d12 dxgi)
+        add_custom_command(TARGET SnowboardKidsDxcRuntimeProbe POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                $<TARGET_RUNTIME_DLLS:SnowboardKidsDxcRuntimeProbe>
+                "${SBK_DXC_REDIST_DIR}/dxcompiler.dll"
+                "$<TARGET_FILE_DIR:SnowboardKidsDxcRuntimeProbe>"
+            COMMAND_EXPAND_LISTS)
     endif()
 
     add_executable(SnowboardKidsFirstRunUITest
