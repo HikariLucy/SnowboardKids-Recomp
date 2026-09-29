@@ -102,7 +102,7 @@ class RuntimeResolution:
         for name in self.bundled:
             entry = REDISTRIBUTABLES[name.lower()]
             if entry.evidence == "pending":
-                pending.add(entry.name)
+                pending.add(f"{entry.name} (no reviewed license text)")
             elif entry.evidence == "ms-terms" and not dxc_redist.dxil_redistribution_accepted(root):
                 pending.add(f"{entry.name} (Microsoft distributable-code terms not accepted in "
                             f"{dxc_redist.DXIL_DECISION.as_posix()})")
@@ -116,6 +116,15 @@ class RuntimeResolution:
                 for notice, path in entry.licenses:
                     files[notice] = root / path
         return files
+
+    def missing_license_texts(self, root: Path = ROOT) -> List[str]:
+        """Bundled DLLs whose license text is not present in this checkout."""
+        missing = []
+        for name in self.bundled:
+            for notice, path in REDISTRIBUTABLES[name.lower()].licenses:
+                if not (root / path).is_file():
+                    missing.append(f"{name} (license text {path} not bootstrapped)")
+        return sorted(missing)
 
     def pinned_hash_errors(self) -> List[str]:
         """Bundled DLLs with a pinned SHA-256 must be exactly those bytes."""

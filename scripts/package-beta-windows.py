@@ -121,21 +121,20 @@ def main() -> int:
     # Every gate below fails a public package. A draft may only drop DLLs whose
     # redistribution is not cleared; it never ships unverified bytes.
     blockers = runtime.pinned_hash_errors() + dxc_redist.verify_license_texts(ROOT)
-    license_files = runtime.license_files(ROOT)
-    blockers += [f"license text for {notice} not found: {path}"
-                 for notice, path in sorted(license_files.items()) if not path.is_file()]
     if blockers:
         return fail("runtime redistribution:\n  " + "\n  ".join(blockers))
-    pending = runtime.pending_licenses(ROOT)
+    # A license text that is not bootstrapped (e.g. RT64's SDL2 COPYING.txt in
+    # ROM-free CI) leaves its DLL uncleared, like a pending decision.
+    pending = runtime.pending_licenses(ROOT) + runtime.missing_license_texts(ROOT)
     if pending:
         message = "bundled DLLs whose redistribution is not cleared: " + ", ".join(pending)
         if not draft:
             return fail(message + f"\nSee {dxc_redist.DXIL_DECISION.as_posix()} and docs/DXC-PROVENANCE.md.")
-        withheld = [name for name in runtime.bundled if any(p.startswith(name) for p in pending)]
+        withheld = [name for name in runtime.bundled if any(p.startswith(name + " ") for p in pending)]
         for name in withheld:
             del runtime.bundled[name]
         print(f"WARNING (draft only): {message}; left out of the draft: {', '.join(withheld)}")
-        license_files = runtime.license_files(ROOT)
+    license_files = runtime.license_files(ROOT)
 
     out_dir = args.out_dir.resolve()
     staging = out_dir / "staging-windows"

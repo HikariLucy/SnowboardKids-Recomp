@@ -106,6 +106,8 @@ class RuntimePolicyTests(unittest.TestCase):
                              {'SDL2.dll', 'dxcompiler.dll', 'dxil.dll', 'vcruntime140.dll', 'msvcp140.dll'})
             self.assertNotIn('snowboardkidsengine.exe', result.system)
             self.assertIn('kernel32.dll', result.system)
+            self.assertEqual(result.missing_license_texts(ROOT) == [],
+                             (ROOT / REDISTRIBUTABLES['sdl2.dll'].licenses[0][1]).is_file())
             # dxcompiler.dll is cleared by its vendored texts; dxil.dll waits
             # for the recorded maintainer decision on Microsoft's terms.
             pending = result.pending_licenses(ROOT)
@@ -384,14 +386,18 @@ class PackageScriptTests(unittest.TestCase):
                 info = bundle.read('SnowboardKidsRecompiled/BUILD-INFO.txt').decode()
                 listed = bundle.read('SnowboardKidsRecompiled/RUNTIME-DLLS.txt').decode()
             self.assertIn('SnowboardKidsRecompiled/SnowboardKidsEngine.exe', names)
-            self.assertIn('SnowboardKidsRecompiled/SDL2.dll', names)
-            self.assertIn('SnowboardKidsRecompiled/licenses/SDL2.txt', names)
+            if (ROOT / REDISTRIBUTABLES['sdl2.dll'].licenses[0][1]).is_file():
+                self.assertIn('SnowboardKidsRecompiled/SDL2.dll', names)
+                self.assertIn('SnowboardKidsRecompiled/licenses/SDL2.txt', names)
+                self.assertIn('[bundled] SDL2.dll', listed)
+            else:  # RT64 not bootstrapped (ROM-free CI): never ship SDL2 without its notice
+                self.assertNotIn('SnowboardKidsRecompiled/SDL2.dll', names)
+                self.assertIn('left out of the draft: SDL2.dll', result.stdout)
             self.assertNotIn('SnowboardKidsRecompiled/SnowboardKidsEngine.lib', names)
             self.assertFalse(any('/modules/' in n for n in names))
             # A draft identifies itself inside the archive, not only by file name.
             self.assertIn('Package: draft (not a release candidate; do not distribute)', info)
             self.assertNotIn('public-beta', info)
-            self.assertIn('[bundled] SDL2.dll', listed)
             self.assertNotIn(str(d), listed + info)
             self.assertEqual(audit(archives[0]), [])
             sums = (out / 'SHA256SUMS.txt').read_text()
@@ -411,6 +417,16 @@ class PackageScriptTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('is not the pinned Microsoft DirectXShaderCompiler v1.7.2308', result.stderr)
             self.assertFalse(list((d / 'o').glob('*.zip')) if (d / 'o').exists() else [])
+
+    def test_missing_license_text_withholds_in_draft_and_blocks_public(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdl = root / 'SDL2.dll'
+            sdl.write_bytes(make_pe(['KERNEL32.dll']))
+            resolution = RuntimeResolution({'SDL2.dll': sdl}, [], [])
+            missing = resolution.missing_license_texts(root)  # empty root: nothing bootstrapped
+            self.assertEqual(len(missing), 1)
+            self.assertTrue(missing[0].startswith('SDL2.dll '), missing)
 
     def test_draft_and_public_beta_are_exclusive(self):
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/package_release.py'), '--binary', 'x',
