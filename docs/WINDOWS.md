@@ -445,7 +445,7 @@ Gameplay, the ROM selector, rumble, save persistence and the clean-folder ZIP
 run are verified (see [Verified on physical Windows](#verified-on-physical-windows));
 they are no longer open. What remains is release work:
 
-1. **Definitive artifact**: build the Windows `0.9.0-beta` package from the final
+1. **Definitive artifact**: build the Windows `0.9.0-beta.1` package from the final
    HEAD / merge commit. The validated ZIP was `0.9.0-dev` from `5545c3d`, so it
    must not be published.
 2. **Smoke test** of the definitive artifact: a short run from a clean folder
