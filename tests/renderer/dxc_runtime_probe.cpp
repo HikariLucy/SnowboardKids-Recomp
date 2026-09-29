@@ -133,8 +133,8 @@ std::vector<uint8_t> compileText(const RT64::ShaderCompiler &compiler, const cha
 
 std::vector<uint8_t> linkTrivialPS(const RT64::ShaderCompiler &compiler) {
     IDxcBlob *libs[] = {nullptr, nullptr};
-    compiler.compile(TrivialPSEntry, L"PSMain", L"lib_6_2", RenderShaderFormat::DXIL, &libs[0]);
-    compiler.compile(TrivialPSLibrary, L"shade", L"lib_6_2", RenderShaderFormat::DXIL, &libs[1]);
+    compiler.compile(TrivialPSEntry, L"PSMain", L"lib_6_3", RenderShaderFormat::DXIL, &libs[0]);
+    compiler.compile(TrivialPSLibrary, L"shade", L"lib_6_3", RenderShaderFormat::DXIL, &libs[1]);
     static const wchar_t *names[] = {L"entry", L"library"};
     IDxcBlob *linked = nullptr;
     compiler.link(L"PSMain", L"ps_6_2", libs, names, 2, &linked);
