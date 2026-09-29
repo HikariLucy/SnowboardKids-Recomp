@@ -20,12 +20,17 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     get_filename_component(RECOMP_PROJ_PARENT "${CMAKE_SOURCE_DIR}/.." ABSOLUTE)
+    # clang-cl ignores GCC-style driver options unless forwarded with /clang:.
+    set(SBK_PREFIX_MAP_FLAG "-ffile-prefix-map=")
+    if(MSVC)
+        set(SBK_PREFIX_MAP_FLAG "/clang:-ffile-prefix-map=")
+    endif()
     # The last matching map wins: broadest first so the checkout's own
     # directory name never reaches embedded __FILE__ strings.
     add_compile_options(
-        "-ffile-prefix-map=${RECOMP_PROJ_PARENT}=."
-        "-ffile-prefix-map=${CMAKE_BINARY_DIR}=."
-        "-ffile-prefix-map=${CMAKE_SOURCE_DIR}=."
+        "$<$<COMPILE_LANGUAGE:C,CXX>:${SBK_PREFIX_MAP_FLAG}${RECOMP_PROJ_PARENT}=.>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:${SBK_PREFIX_MAP_FLAG}${CMAKE_BINARY_DIR}=.>"
+        "$<$<COMPILE_LANGUAGE:C,CXX>:${SBK_PREFIX_MAP_FLAG}${CMAKE_SOURCE_DIR}=.>"
     )
 endif()
 
@@ -129,15 +134,29 @@ if(NOT EXISTS "${N64_RUNTIME_DIR}/librecomp/include/librecomp/rsp.hpp")
     )
 endif()
 
+option(SBK_CONTINUATIONS "Explicit serializable continuation backend (P4-A validated)" OFF)
+
+# ROM-free split runtime: build only SnowboardKidsEngine, which loads the game
+# module at run time. No SnowboardKidsCpu/Rsp/Recompiled targets and no
+# ROM-derived corpus are required, so hosted CI can build the release engine.
+option(SBK_ENGINE_ONLY "Build only the ROM-free SnowboardKidsEngine (no ROM-derived targets)" OFF)
+if(SBK_ENGINE_ONLY)
+    if(NOT SBK_BUILD_RENDERER_STACK OR NOT SBK_BUILD_NATIVE_BOOT OR SBK_BUILD_RUNTIME_SMOKE)
+        message(FATAL_ERROR "SBK_ENGINE_ONLY requires SBK_BUILD_RENDERER_STACK=ON, SBK_BUILD_NATIVE_BOOT=ON and SBK_BUILD_RUNTIME_SMOKE=OFF")
+    endif()
+endif()
+
 # CI-only: compile the patched renderer/frontend/runtime stack without the
 # ROM-derived CPU and RSP sources. Never a production or packaging path.
 option(SBK_RENDERER_COMPILE_CI "CI only: build the renderer stack without ROM-derived code" OFF)
 if(SBK_RENDERER_COMPILE_CI)
-    if(NOT SBK_BUILD_RENDERER_STACK OR SBK_BUILD_NATIVE_BOOT OR SBK_BUILD_RUNTIME_SMOKE OR SBK_BUILD_QUIESCENCE_TESTS)
-        message(FATAL_ERROR "SBK_RENDERER_COMPILE_CI requires SBK_BUILD_RENDERER_STACK=ON and no executables that need ROM-derived code")
+    if(NOT SBK_BUILD_RENDERER_STACK OR SBK_BUILD_RUNTIME_SMOKE OR SBK_BUILD_QUIESCENCE_TESTS OR
+       (SBK_BUILD_NATIVE_BOOT AND NOT SBK_ENGINE_ONLY))
+        message(FATAL_ERROR "SBK_RENDERER_COMPILE_CI requires SBK_BUILD_RENDERER_STACK=ON and no executables that need ROM-derived code (native boot only with SBK_ENGINE_ONLY=ON)")
     endif()
+elseif(SBK_ENGINE_ONLY)
+    message(STATUS "Configured ROM-free engine-only build (no SnowboardKidsCpu/Rsp)")
 else()
-option(SBK_CONTINUATIONS "Explicit serializable continuation backend (P4-A validated)" OFF)
 set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/RecompiledFuncs")
 if(SBK_CONTINUATIONS)
     set(SBK_CPU_OUTPUT_DIR "${CMAKE_SOURCE_DIR}/build-tools/production-continuation/corpus")
@@ -389,7 +408,25 @@ if(SBK_BUILD_NATIVE_BOOT)
 
     find_package(Threads REQUIRED)
 
-    add_executable(SnowboardKidsRecompiled
+    # Windows: SDL2 and FreeType come from the prebuilt trees pinned inside
+    # RT64/RecompFrontend. SDL2's config package gives SDL2::SDL2 a DLL
+    # location, so the runtime DLLs can be staged beside the executable.
+    if(WIN32)
+        if(NOT TARGET SDL2::SDL2)
+            find_package(SDL2 CONFIG REQUIRED
+                PATHS "${RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/cmake"
+                NO_DEFAULT_PATH)
+        endif()
+        if(NOT TARGET Freetype::Freetype)
+            set(SBK_FREETYPE_WIN_DIR "${RECOMP_FRONTEND_DIR}/recompui/lib/freetype-windows-binaries")
+            add_library(Freetype::Freetype STATIC IMPORTED)
+            set_target_properties(Freetype::Freetype PROPERTIES
+                IMPORTED_LOCATION "${SBK_FREETYPE_WIN_DIR}/release static/vs2015-2022/win64/freetype.lib"
+                INTERFACE_INCLUDE_DIRECTORIES "${SBK_FREETYPE_WIN_DIR}/include")
+        endif()
+    endif()
+
+    set(SBK_APP_SOURCES
         "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
         "${CMAKE_SOURCE_DIR}/src/main/virtual_pad.cpp"
         "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
@@ -405,21 +442,14 @@ if(SBK_BUILD_NATIVE_BOOT)
         ${SNOWBOARDKIDS_THEME_SOURCES}
     )
 
-    add_executable(SnowboardKidsEngine
-        "${CMAKE_SOURCE_DIR}/src/main/native_boot.cpp"
-        "${CMAKE_SOURCE_DIR}/src/main/virtual_pad.cpp"
-        "${CMAKE_SOURCE_DIR}/src/quiescence/probe.cpp"
-        "${CMAKE_SOURCE_DIR}/src/main/register_overlays.cpp"
-        "${CMAKE_SOURCE_DIR}/src/main/runtime_compat.cpp"
-        "${CMAKE_SOURCE_DIR}/src/pfs/controller_pak.cpp"
-        "${CMAKE_SOURCE_DIR}/src/pfs/hle.cpp"
-        "${CMAKE_SOURCE_DIR}/src/module/module_loader.cpp"
-        "${CMAKE_SOURCE_DIR}/src/ui/menu.cpp"
-        "${CMAKE_SOURCE_DIR}/src/ui/ux_settings.cpp"
-        "${CMAKE_SOURCE_DIR}/src/ui/first_run_process.cpp"
-        "${CMAKE_SOURCE_DIR}/src/ui/first_run_window.cpp"
-        ${SNOWBOARDKIDS_THEME_SOURCES}
-    )
+    # SnowboardKidsEngine is always built. The monolithic executable links the
+    # ROM-derived CPU/RSP libraries and is skipped in engine-only mode.
+    set(SBK_APP_TARGETS SnowboardKidsEngine)
+    if(NOT SBK_ENGINE_ONLY)
+        list(APPEND SBK_APP_TARGETS SnowboardKidsRecompiled)
+        add_executable(SnowboardKidsRecompiled ${SBK_APP_SOURCES})
+    endif()
+    add_executable(SnowboardKidsEngine ${SBK_APP_SOURCES})
     target_compile_definitions(SnowboardKidsEngine PRIVATE SBK_ROM_FREE_ENGINE=1)
 
     enable_testing()
@@ -463,35 +493,23 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_test(NAME ui_assets
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/release/test_ui_assets.py")
 
-    add_dependencies(SnowboardKidsRecompiled sbk_version_header)
-    add_dependencies(SnowboardKidsEngine sbk_version_header)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
+        add_dependencies(${SBK_EXE} sbk_version_header)
+        if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT MSVC)
+            target_compile_options(${SBK_EXE} PRIVATE
+                -fno-strict-aliasing
+                -fms-extensions
+                -fno-omit-frame-pointer
+            )
+        elseif(MSVC)
+            target_compile_options(${SBK_EXE} PRIVATE /permissive-)
+        endif()
+        if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+            target_link_options(${SBK_EXE} PRIVATE -rdynamic)
+        endif()
+    endforeach()
 
-    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(SnowboardKidsRecompiled PRIVATE
-            -fno-strict-aliasing
-            -fms-extensions
-            -fno-omit-frame-pointer
-        )
-        target_compile_options(SnowboardKidsEngine PRIVATE
-            -fno-strict-aliasing
-            -fms-extensions
-            -fno-omit-frame-pointer
-        )
-    elseif(MSVC)
-        target_compile_options(SnowboardKidsRecompiled PRIVATE
-            /permissive-
-        )
-        target_compile_options(SnowboardKidsEngine PRIVATE
-            /permissive-
-        )
-    endif()
-
-    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-        target_link_options(SnowboardKidsRecompiled PRIVATE -rdynamic)
-        target_link_options(SnowboardKidsEngine PRIVATE -rdynamic)
-    endif()
-
-    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
         target_include_directories(${SBK_EXE} PRIVATE
             "${CMAKE_SOURCE_DIR}"
             "${CMAKE_BINARY_DIR}/generated"
@@ -511,46 +529,65 @@ if(SBK_BUILD_NATIVE_BOOT)
         )
     endforeach()
 
-    target_link_libraries(SnowboardKidsRecompiled PRIVATE
-        SnowboardKidsCpu
-        SnowboardKidsRsp
-        recompui
-        recompinput
-        recompui
-        librecomp
-        ultramodern
-        rt64
-        nfd
-        SDL2::SDL2
-        Threads::Threads
-        ${CMAKE_DL_LIBS}
-    )
-
-    target_link_libraries(SnowboardKidsEngine PRIVATE
-        recompui
-        recompinput
-        recompui
-        librecomp
-        ultramodern
-        rt64
-        nfd
-        SDL2::SDL2
-        Threads::Threads
-        ${CMAKE_DL_LIBS}
-    )
-
-    if(CMAKE_SYSTEM_NAME MATCHES "Linux")
-        target_link_libraries(SnowboardKidsRecompiled PRIVATE atomic)
-        target_link_libraries(SnowboardKidsEngine PRIVATE atomic)
+    if(TARGET SnowboardKidsRecompiled)
+        target_link_libraries(SnowboardKidsRecompiled PRIVATE SnowboardKidsCpu SnowboardKidsRsp)
     endif()
-
     # First-run setup draws with the FreeType build RmlUi already requires.
-    if(WIN32)
-        list(APPEND CMAKE_MODULE_PATH "${RECOMP_FRONTEND_DIR}/recompui/lib")
+    if(NOT WIN32)
+        find_package(Freetype REQUIRED)
     endif()
-    find_package(Freetype REQUIRED)
-    target_link_libraries(SnowboardKidsRecompiled PRIVATE Freetype::Freetype)
-    target_link_libraries(SnowboardKidsEngine PRIVATE Freetype::Freetype)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
+        target_link_libraries(${SBK_EXE} PRIVATE
+            recompui
+            recompinput
+            recompui
+            librecomp
+            ultramodern
+            rt64
+            nfd
+            SDL2::SDL2
+            Threads::Threads
+            Freetype::Freetype
+            ${CMAKE_DL_LIBS}
+        )
+        if(CMAKE_SYSTEM_NAME MATCHES "Linux")
+            target_link_libraries(${SBK_EXE} PRIVATE atomic)
+        endif()
+    endforeach()
+
+    # PE/COFF has no -rdynamic: the game module DLL imports the runtime entry
+    # points it needs from SnowboardKidsEngine.exe through an import library.
+    # One reviewed list (src/module/engine_exports.inc) feeds this .def and the
+    # module builder, so both sides agree on the exact exported surface.
+    if(WIN32)
+        file(STRINGS "${CMAKE_SOURCE_DIR}/src/module/engine_exports.inc" SBK_ENGINE_EXPORT_LINES
+            REGEX "^SBK_ENGINE_EXPORT(_C)?\\(")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+            "${CMAKE_SOURCE_DIR}/src/module/engine_exports.inc")
+        set(SBK_ENGINE_DEF_TEXT "EXPORTS\n")
+        foreach(SBK_LINE ${SBK_ENGINE_EXPORT_LINES})
+            string(REGEX REPLACE "^SBK_ENGINE_EXPORT(_C)?\\(([A-Za-z0-9_]+)\\).*" "\\2" SBK_SYMBOL "${SBK_LINE}")
+            string(APPEND SBK_ENGINE_DEF_TEXT "    ${SBK_SYMBOL}\n")
+        endforeach()
+        set(SBK_ENGINE_DEF "${CMAKE_BINARY_DIR}/generated/SnowboardKidsEngine.def")
+        file(CONFIGURE OUTPUT "${SBK_ENGINE_DEF}" CONTENT "${SBK_ENGINE_DEF_TEXT}")
+        set_target_properties(SnowboardKidsEngine PROPERTIES ENABLE_EXPORTS ON)
+        target_link_options(SnowboardKidsEngine PRIVATE "/DEF:${SBK_ENGINE_DEF}")
+        set_property(TARGET SnowboardKidsEngine APPEND PROPERTY LINK_DEPENDS "${SBK_ENGINE_DEF}")
+
+        # Runtime DLLs the executables load at startup: SDL2 (imported target)
+        # and RT64's DirectX shader compiler, which rt64 links by import
+        # library. Release staging re-derives the set from the PE imports.
+        foreach(SBK_EXE ${SBK_APP_TARGETS})
+            add_custom_command(TARGET ${SBK_EXE} POST_BUILD
+                COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                    $<TARGET_RUNTIME_DLLS:${SBK_EXE}>
+                    "${RT64_DIR}/src/contrib/dxc/bin/x64/dxcompiler.dll"
+                    "${RT64_DIR}/src/contrib/dxc/bin/x64/dxil.dll"
+                    "$<TARGET_FILE_DIR:${SBK_EXE}>"
+                COMMAND_EXPAND_LISTS)
+        endforeach()
+    endif()
 
     add_executable(SnowboardKidsFirstRunUITest
         tests/frontend/first_run_ui.cpp
@@ -562,14 +599,21 @@ if(SBK_BUILD_NATIVE_BOOT)
     add_test(NAME ui_first_run_layout
         COMMAND SnowboardKidsFirstRunUITest "$<TARGET_FILE_DIR:SnowboardKidsEngine>/assets")
     set_tests_properties(ui_first_run_layout PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy")
-    add_test(NAME ui_graphics_config
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/graphics_config/run.py")
-    add_test(NAME ui_ux_config
-        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ux_config/run.py")
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # Host harnesses that compile with clang++/ASan against system SDL2.
+        add_test(NAME ui_graphics_config
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/graphics_config/run.py")
+        add_test(NAME ui_ux_config
+            COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/ux_config/run.py")
         add_test(NAME input_capture_events
             COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/controls/run_capture_events.py")
     endif()
+    # ROM-free: a synthetic module built by the module builder toolchain must
+    # load, validate and initialize in the real engine (PE imports on Windows).
+    add_test(NAME module_engine_probe
+        COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/module/run_engine_probe.py"
+            --engine "$<TARGET_FILE:SnowboardKidsEngine>")
+    set_tests_properties(module_engine_probe PROPERTIES TIMEOUT 600)
 
     # Both executables share a build directory. Stage once so parallel links
     # cannot replace the same assets directory at the same time.
@@ -578,8 +622,9 @@ if(SBK_BUILD_NATIVE_BOOT)
             --out "${CMAKE_BINARY_DIR}/assets"
         COMMENT "Staging reviewed fonts and original SBK UI assets"
     )
-    add_dependencies(SnowboardKidsRecompiled SnowboardKidsAssets)
-    add_dependencies(SnowboardKidsEngine SnowboardKidsAssets)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
+        add_dependencies(${SBK_EXE} SnowboardKidsAssets)
+    endforeach()
 endif()
 
 # P2 coordinator remains inert unless SBK_P2_CYCLES is set at runtime.
@@ -631,15 +676,15 @@ endif()
 
 # Development A/B selection; production acceptance must explicitly select ON.
 if(SBK_CONTINUATIONS)
-    if(NOT TARGET SnowboardKidsRecompiled)
-        message(FATAL_ERROR "P4-A backend requires the real native-boot application target")
+    if(NOT TARGET SnowboardKidsEngine)
+        message(FATAL_ERROR "P4-A backend requires the native-boot application targets")
     endif()
-    foreach(SBK_TARGET SnowboardKidsRecompiled SnowboardKidsEngine librecomp ultramodern)
+    foreach(SBK_TARGET ${SBK_APP_TARGETS} librecomp ultramodern)
         target_compile_definitions(${SBK_TARGET} PRIVATE SBK_CONTINUATIONS=1)
         target_include_directories(${SBK_TARGET} PRIVATE
             "${CMAKE_SOURCE_DIR}/src" "${N64_RUNTIME_DIR}/N64Recomp/include")
     endforeach()
-    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
         target_sources(${SBK_EXE} PRIVATE
             src/continuation/dispatch.cpp src/continuation/execution.cpp
             src/continuation/hle.cpp src/continuation/runtime_owner.cpp)
@@ -655,12 +700,14 @@ if(SBK_CONTINUATIONS)
     if(NOT SBK_SHUTDOWN_PATCH)
         message(FATAL_ERROR "Runtime shutdown patch missing. Run: python3 scripts/apply-continuation-patches.py")
     endif()
-    foreach(SBK_EXE SnowboardKidsRecompiled SnowboardKidsEngine)
+    foreach(SBK_EXE ${SBK_APP_TARGETS})
         target_sources(${SBK_EXE} PRIVATE
             src/savestate/snapshot.cpp src/savestate/service.cpp
             src/savestate/runtime_domains.cpp src/savestate/app_domains.cpp
             src/savestate/host_audio.cpp src/savestate/sbks.cpp src/savestate/storage.cpp
             src/savestate/driver.cpp src/savestate/toast.cpp src/savestate/dev_trigger.cpp)
     endforeach()
-    target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
+    if(TARGET SnowboardKidsRecompiled)
+        target_include_directories(SnowboardKidsRecompiled PRIVATE "${SBK_CPU_OUTPUT_DIR}")
+    endif()
 endif()

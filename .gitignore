@@ -71,3 +71,5 @@ build-tools
 build-release-ci/
 build-ci/
 build-split/
+build-engine/
+build-rci/

@@ -33,7 +33,7 @@
 #endif
 
 #define SDL_MAIN_HANDLED
-#include <SDL2/SDL.h>
+#include <SDL.h>
 #include "nfd.h"
 #include "sbk_version.h"
 
@@ -727,6 +727,24 @@ static int invoke_local_module_builder(const std::filesystem::path& install_dir,
 
 } // namespace
 
+static SbkEngineApiV1 make_engine_api() {
+    SbkEngineApiV1 engine_api{};
+    engine_api.abi_version = 1;
+    engine_api.struct_size = sizeof(SbkEngineApiV1);
+    engine_api.switch_error = [](const char* section, uint32_t jtbl_addr, uint32_t target) {
+        std::fprintf(stderr, "Jump table error in %s: jtbl 0x%08X, target 0x%08X\n",
+                     section ? section : "unknown", jtbl_addr, target);
+        std::abort();
+    };
+    engine_api.dmem = dmem;
+#ifdef SBK_CONTINUATIONS
+    engine_api.continuation_enter = [](uint64_t id, uint8_t* rdram, recomp_context* ctx) {
+        sbk::continuation::enter(id, rdram, ctx);
+    };
+#endif
+    return engine_api;
+}
+
 int main(int argc, char** argv) {
     std::filesystem::path explicit_module_path;
     std::filesystem::path rom_path;
@@ -786,6 +804,11 @@ int main(int argc, char** argv) {
         }
         if (!mod.validate(0xF384619787B78D4BULL, "snowboardkids.n64.us", err)) {
             std::fprintf(stderr, "MODULE_VALIDATION_ERROR: %s\n", err.c_str());
+            return 1;
+        }
+        // init() is where a Windows module binds and checks the engine exports.
+        if (!mod.initialize(make_engine_api(), err)) {
+            std::fprintf(stderr, "MODULE_INIT_ERROR: %s\n", err.c_str());
             return 1;
         }
         const auto* api = mod.api();
@@ -931,7 +954,7 @@ int main(int argc, char** argv) {
                 return EXIT_FAILURE;
         }
         std::printf("[FIRST-RUN] Successfully loaded newly installed game module: %s\n",
-                    sbk::g_game_module.loaded_path().c_str());
+                    sbk::g_game_module.loaded_path().string().c_str());
 #else
         std::fprintf(stderr, "[MODULE] Candidate load failed (%s): %s\n",
                      sbk::module::status_string(mod_status), mod_err.c_str());
@@ -939,21 +962,8 @@ int main(int argc, char** argv) {
     }
 
     if (sbk::g_game_module.is_loaded()) {
-        std::printf("[MODULE] Loaded game module from: %s\n", sbk::g_game_module.loaded_path().c_str());
-        SbkEngineApiV1 engine_api{};
-        engine_api.abi_version = 1;
-        engine_api.struct_size = sizeof(SbkEngineApiV1);
-        engine_api.switch_error = [](const char* section, uint32_t jtbl_addr, uint32_t target) {
-            std::fprintf(stderr, "Jump table error in %s: jtbl 0x%08X, target 0x%08X\n",
-                         section ? section : "unknown", jtbl_addr, target);
-            std::abort();
-        };
-        engine_api.dmem = dmem;
-#ifdef SBK_CONTINUATIONS
-        engine_api.continuation_enter = [](uint64_t id, uint8_t* rdram, recomp_context* ctx) {
-            sbk::continuation::enter(id, rdram, ctx);
-        };
-#endif
+        std::printf("[MODULE] Loaded game module from: %s\n", sbk::g_game_module.loaded_path().string().c_str());
+        const SbkEngineApiV1 engine_api = make_engine_api();
         if (!sbk::g_game_module.initialize(engine_api, mod_err)) {
             std::fprintf(stderr, "Failed to initialize game module: %s\n", mod_err.c_str());
             return EXIT_FAILURE;
