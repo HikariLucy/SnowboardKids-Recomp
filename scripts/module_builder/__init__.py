@@ -13,6 +13,7 @@ from .errors import (
 )
 from .rom import (
     EXPECTED_SHA1,
+    EXPECTED_SHA256,
     EXPECTED_ROM_HASH_HEX,
     EXPECTED_ROM_HASH_U64,
     detect_and_normalize_rom,
@@ -39,6 +40,8 @@ __all__ = [
     "CompileError",
     "GeneratorError",
     "LinkError",
+    "EXPECTED_SHA1",
+    "EXPECTED_SHA256",
     "MissingCompilerError",
     "ModuleBuilderService",
     "ModuleValidationError",
