@@ -1,7 +1,7 @@
 # Third-party notices and distribution review
 
 This file records the licensing/provenance status of the dependency tree used by
-Snowboard Kids Recompiled `v0.9.0-beta`. It is an inventory and disclosure,
+Snowboard Kids Recompiled `v0.9.0-beta.1` and compatible later beta refreshes. It is an inventory and disclosure,
 not a substitute for the license texts themselves and not a legal opinion.
 
 The public beta archive includes this file, the project GPL-3.0 license, the
@@ -40,7 +40,7 @@ has requested clarification upstream:
 
 https://github.com/N64Recomp/RecompFrontend/issues/44
 
-The `v0.9.0-beta` distribution intentionally does **not** infer or invent a
+The public beta distribution intentionally does **not** infer or invent a
 license for RecompFrontend. Its unresolved status is disclosed here, in the
 beta distribution policy and in the GitHub Release notes.
 
@@ -63,3 +63,8 @@ The user must provide their own supported Snowboard Kids (USA) ROM and the
 engine validates it before gameplay.
 
 See `docs/BETA-DISTRIBUTION-POLICY.md` for the public-beta release policy.
+
+For launcher authors, `LAUNCHER-INTEGRATION.md` documents a conservative
+non-owning registration route while this licensing uncertainty remains open.
+That route is an interoperability boundary, not a substitute for or expansion
+of any third-party license grant.
