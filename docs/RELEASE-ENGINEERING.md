@@ -1,6 +1,6 @@
 # Release engineering — v0.9.0-beta.1
 
-Updated: 2026-09-29
+Updated: 2026-10-03
 
 This document describes the cross-platform public beta refresh of Snowboard
 Kids Recompiled. Linux x86-64 and Windows x86-64 are both validated release
@@ -151,13 +151,23 @@ SnowboardKidsRecompiled/
 ├── THIRD_PARTY_NOTICES.md
 ├── SOURCE-COMPLIANCE.md
 ├── BETA-DISTRIBUTION-POLICY.md
+├── ROM-IDENTITY.md
+├── LAUNCHER-INTEGRATION.md
 ├── BUILD-INFO.txt
-└── RUNNING.md
+├── RUNNING.md
+└── scripts/
+    └── rom_identity.py
 ```
 
 The audit rejects ROM headers/extensions, user data, saves, Controller Pak
 images, savestates, logs, build junk, symlinks and personal absolute paths.
 The game module is permitted only at the canonical module path.
+
+`ROM-IDENTITY.md` and `LAUNCHER-INTEGRATION.md` are required release metadata.
+The readiness gate verifies that the canonical SHA-256 and the external
+user-data ownership boundary remain documented. `scripts/rom_identity.py` is
+ROM-free tooling: it inspects a user-supplied source locally and never writes or
+uploads ROM bytes.
 
 ## CI
 
