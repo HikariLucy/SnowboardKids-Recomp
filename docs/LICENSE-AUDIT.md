@@ -1,7 +1,7 @@
 # License and Distribution Audit
 
-Updated: 2026-09-29
-Release target: `v0.9.0-beta`
+Updated: 2026-10-03
+Release target: `v0.9.0-beta.1` and later compatible beta refreshes
 
 This document records the engineering evidence used for release packaging. It
 does not replace legal advice and does not invent rights for third-party code
@@ -58,7 +58,7 @@ explicit upstream license grant.
 Project-authored source now has a root GPL-3.0 license. N64ModernRuntime is
 GPL-3.0 and is statically linked into `SnowboardKidsEngine`.
 
-The release page must link to the exact `v0.9.0-beta` source tag. The
+The release page must link to the exact source tag corresponding to the distributed binary. The
 repository retains:
 
 - project source;
@@ -117,7 +117,9 @@ Required public-beta files include:
 - `SOURCE-COMPLIANCE.md`;
 - `BETA-DISTRIBUTION-POLICY.md`;
 - `BUILD-INFO.txt`;
-- `RUNNING.md`.
+- `RUNNING.md`;
+- `ROM-IDENTITY.md`;
+- `LAUNCHER-INTEGRATION.md`.
 
 ## 7. Windows runtime DLLs
 
@@ -142,9 +144,15 @@ DXIL itself, and CI proves RT64's run-time path and D3D12 acceptance with no
 its terms was taken or is required (`docs/DXIL-REDISTRIBUTION.md`, historical).
 Evidence and re-check commands: `docs/DXC-PROVENANCE.md`.
 
-## 8. Release decision
+## 8. Launcher redistribution boundary
 
-For `v0.9.0-beta`, the project owner has chosen to proceed with a public
+`LAUNCHER-INTEGRATION.md` separates launcher-owned package bytes from the user's external ROM and mutable user-data root. It also records the non-owning registration path available to launchers that choose not to redistribute the package while RecompFrontend licensing remains unresolved. This documentation is an integration contract, not a new license grant.
+
+`ROM-IDENTITY.md` records the canonical normalized SHA-256 and SHA-1 of the supported USA source without shipping any game data.
+
+## 9. Release decision
+
+For the public beta, the project owner has chosen to proceed with a public
 binary beta while the RecompFrontend license clarification remains pending,
 provided that the pending status stays explicit and the artifact passes the
 release audit.
