@@ -7,6 +7,7 @@ from typing import Tuple
 from .errors import RomValidationError
 
 EXPECTED_SHA1 = "1583bacc9046a360df8ea4d536942155247e154c"
+EXPECTED_SHA256 = "58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c"
 EXPECTED_ROM_HASH_HEX = "0xF384619787B78D4B"
 EXPECTED_ROM_HASH_U64 = 0xF384619787B78D4B
 EXPECTED_ROM_SIZE = 8 * 1024 * 1024  # 8 MiB
@@ -83,12 +84,21 @@ def validate_rom(rom_path: Path) -> Tuple[bytes, str, str]:
     """
     normalized, format_name = detect_and_normalize_rom(rom_path)
     sha1 = hashlib.sha1(normalized).hexdigest()
+    sha256 = hashlib.sha256(normalized).hexdigest()
 
     if sha1.lower() != EXPECTED_SHA1.lower():
         raise RomValidationError(
             f"ROM SHA-1 mismatch:\n"
             f"  Calculated: {sha1}\n"
             f"  Expected:   {EXPECTED_SHA1}\n"
+            f"The provided ROM is not the supported Snowboard Kids (USA) v1.0 image."
+        )
+
+    if sha256.lower() != EXPECTED_SHA256.lower():
+        raise RomValidationError(
+            f"ROM SHA-256 mismatch:\n"
+            f"  Calculated: {sha256}\n"
+            f"  Expected:   {EXPECTED_SHA256}\n"
             f"The provided ROM is not the supported Snowboard Kids (USA) v1.0 image."
         )
 
