@@ -174,6 +174,7 @@ class WindowsArchiveTests(unittest.TestCase):
                 listed = bundle.read('SnowboardKidsRecompiled/RUNTIME-DLLS.txt').decode()
             for required in ('SnowboardKidsEngine.exe', 'SDL2.dll', 'licenses/SDL2.txt', 'LICENSE',
                              'modules/snowboardkids-us/SnowboardKidsGame.dll', 'RUNNING.md',
+                             'ROM-IDENTITY.md', 'LAUNCHER-INTEGRATION.md',
                              'SOURCE-COMPLIANCE.md', 'THIRD_PARTY_NOTICES.md', 'BUILD-INFO.txt',
                              'BETA-DISTRIBUTION-POLICY.md', 'RUNTIME-DLLS.txt'):
                 self.assertIn('SnowboardKidsRecompiled/' + required, names)
@@ -192,6 +193,7 @@ class WindowsArchiveTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             archive = Path(directory) / 'a.zip'
             base = {'SnowboardKidsEngine.exe': b'MZ', 'BUILD-INFO.txt': b'x', 'RUNNING.md': b'x',
+                    'ROM-IDENTITY.md': b'x', 'LAUNCHER-INTEGRATION.md': b'x',
                     'THIRD_PARTY_NOTICES.md': b'x', 'LICENSE': b'x', 'SOURCE-COMPLIANCE.md': b'x'}
             base.update(entries)
             if manifest:  # describe exactly the top-level DLLs, as the packager does
