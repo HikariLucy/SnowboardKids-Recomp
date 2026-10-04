@@ -18,6 +18,7 @@ class ReadinessTest(unittest.TestCase):
         self.assertIn("dependency_provenance", pass_names)
         self.assertIn("promptfont_license", pass_names)
         self.assertIn("bundled_font_licenses", pass_names)
+        self.assertIn("launcher_integration_contract", pass_names)
 
         # Project/GPL release metadata is now present.
         self.assertIn("project_license", pass_names)
@@ -34,6 +35,7 @@ class ReadinessTest(unittest.TestCase):
         self.assertNotEqual(res.returncode, 0)
         self.assertIn("PASS dependency_provenance", res.stdout)
         self.assertIn("PASS bundled_font_licenses", res.stdout)
+        self.assertIn("PASS launcher_integration_contract", res.stdout)
         self.assertIn("BLOCKER recompfrontend_license", res.stderr)
         self.assertNotIn("BLOCKER project_license", res.stderr)
         self.assertIn("PASS project_license", res.stdout)
