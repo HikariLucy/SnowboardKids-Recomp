@@ -5,8 +5,14 @@ and a precompiled `SnowboardKidsGame` module. It contains **no ROM** and **no
 extracted commercial game assets**.
 
 You supply your own legally dumped **Snowboard Kids (USA)** ROM image
-(`.z64`, `.v64`, `.n64`). Supported normalized ROM SHA-1:
-`1583bacc9046a360df8ea4d536942155247e154c`.
+(`.z64`, `.v64`, `.n64`). Supported normalized ROM identities:
+
+- SHA-256: `58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c`
+- SHA-1: `1583bacc9046a360df8ea4d536942155247e154c`
+
+See [ROM-IDENTITY.md](ROM-IDENTITY.md) for byte-order normalization and the
+local identity reporter. Third-party launcher authors should also read
+[LAUNCHER-INTEGRATION.md](LAUNCHER-INTEGRATION.md).
 
 ---
 
