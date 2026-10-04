@@ -1,6 +1,6 @@
 # Public beta distribution policy
 
-Updated: 2026-09-29
+Updated: 2026-10-03
 
 Snowboard Kids Recompiled `v0.9.0-beta.1` is an unofficial, noncommercial public
 beta intended for preservation, interoperability and testing.
@@ -59,6 +59,7 @@ A public beta archive must:
 - contain no ROM or extracted commercial game assets;
 - contain no user saves, Controller Pak files, savestates or local config;
 - contain `LICENSE`, `THIRD_PARTY_NOTICES.md` and `SOURCE-COMPLIANCE.md`;
+- contain `ROM-IDENTITY.md` with the exact canonical source hashes and `LAUNCHER-INTEGRATION.md` with the package/user-data ownership boundary;
 - identify the exact project commit and dependency-lock digest;
 - include the reviewed engine and game module only;
 - pass `scripts/audit_release_artifact.py`;
@@ -67,3 +68,7 @@ A public beta archive must:
 
 The unresolved RecompFrontend license status must remain visible until upstream
 provides an explicit grant.
+
+The launcher integration contract does not grant new redistribution rights. A
+launcher may use it to implement a non-owning registration/launch route that
+leaves the user's prepared package, ROM and mutable data under user ownership.

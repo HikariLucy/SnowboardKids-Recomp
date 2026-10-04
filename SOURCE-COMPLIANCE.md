@@ -26,6 +26,14 @@ the GPL-covered engine source. It contains statically recompiled game logic and
 generated RSP code and is disclosed separately in
 `docs/BETA-DISTRIBUTION-POLICY.md`.
 
+## Launcher and source-identity metadata
+
+`ROM-IDENTITY.md` records hashes and structural metadata for the exact supported
+user-provided source without containing any ROM bytes. `LAUNCHER-INTEGRATION.md`
+documents executable layout, persistence boundaries and safe managed/non-owning
+launcher behavior. These files are interoperability metadata and do not alter
+third-party license terms.
+
 ## No game ROM in source or binary distribution
 
 The repository and release archives intentionally exclude the Snowboard Kids

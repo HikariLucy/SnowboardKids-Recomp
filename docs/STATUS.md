@@ -1,14 +1,18 @@
 # Project Status
 
-Updated: 2026-09-24
+Updated: 2026-10-03
 
 ## Baseline validated
 
 The original Snowboard Kids USA dump has been normalized to big-endian Z64 format and verified with:
 
 ```text
-SHA-1: 1583bacc9046a360df8ea4d536942155247e154c
-Size: 8388608 bytes
+SHA-256: 58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c
+SHA-1:   1583bacc9046a360df8ea4d536942155247e154c
+MD5:     eb31f4f9c1fe26a3a663f74e9790516e
+CRC32:   020fb906
+Size:    8388608 bytes
+Game ID: NSKE
 ```
 
 The source file encountered during setup used the N64 extension but had the V64 byte-order header:

@@ -16,6 +16,8 @@ class ArtifactAuditTest(unittest.TestCase):
                 'SnowboardKidsRecompiled/SnowboardKidsRecompiled': b'ELF safe',
                 'SnowboardKidsRecompiled/BUILD-INFO.txt': b'Project: Snowboard Kids Recompiled\nVersion: 0.1.0\nCommit: e430e84c8bad\nPlatform: linux\nArchitecture: x86_64\n',
                 'SnowboardKidsRecompiled/RUNNING.md': b'Run it',
+                'SnowboardKidsRecompiled/ROM-IDENTITY.md': b'ROM identity',
+                'SnowboardKidsRecompiled/LAUNCHER-INTEGRATION.md': b'Launcher contract',
                 'SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md': b'Notices',
                 'SnowboardKidsRecompiled/LICENSE': b'GPLv3',
                 'SnowboardKidsRecompiled/SOURCE-COMPLIANCE.md': b'Source directions',

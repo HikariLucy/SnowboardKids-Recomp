@@ -98,6 +98,10 @@ def audit(archive):
             errors.append('missing build manifest (BUILD-INFO.txt)')
         if 'SnowboardKidsRecompiled/RUNNING.md' not in names:
             errors.append('missing running guide')
+        if 'SnowboardKidsRecompiled/ROM-IDENTITY.md' not in names:
+            errors.append('missing ROM identity contract')
+        if 'SnowboardKidsRecompiled/LAUNCHER-INTEGRATION.md' not in names:
+            errors.append('missing launcher integration contract')
         if 'SnowboardKidsRecompiled/THIRD_PARTY_NOTICES.md' not in names:
             errors.append('missing third-party notices')
         if 'SnowboardKidsRecompiled/LICENSE' not in names:

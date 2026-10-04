@@ -75,13 +75,27 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
     else:
         blockers.append(("recompfrontend_license", "RecompFrontend lacks an explicit top-level license grant"))
 
-    # 4. Project license
+    # 4. Launcher/source identity contract. Keep exact ROM identity and the
+    # ownership/persistence boundary reviewable without shipping game data.
+    rom_identity = root / 'ROM-IDENTITY.md'
+    launcher_contract = root / 'LAUNCHER-INTEGRATION.md'
+    expected_sha256 = '58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c'
+    if (rom_identity.is_file() and launcher_contract.is_file() and
+        expected_sha256 in rom_identity.read_text(errors='ignore') and
+        'SBK_USER_DATA_DIR' in launcher_contract.read_text(errors='ignore')):
+        passes.append(('launcher_integration_contract',
+                       'canonical SHA-256 and package/user-data ownership boundary are documented'))
+    else:
+        blockers.append(('launcher_integration_contract',
+                         'missing exact ROM identity or launcher ownership/persistence contract'))
+
+    # 5. Project license
     if (root / "LICENSE").is_file() or (root / "COPYING").is_file():
         passes.append(("project_license", "project root GPL-3.0 license present"))
     else:
         blockers.append(("project_license", "repository owner has not yet selected a project license"))
 
-    # 5. Dependency GPL compliance evidence. This is a packaging gate for the
+    # 6. Dependency GPL compliance evidence. This is a packaging gate for the
     # repository/source directions, not a legal opinion.
     runtime_license = root / ".deps-runtime/N64ModernRuntime/COPYING"
     source_directions = root / "SOURCE-COMPLIANCE.md"
@@ -94,7 +108,7 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
         blockers.append(("dependency_gpl_compliance",
                          "GPL runtime release requires project LICENSE and SOURCE-COMPLIANCE.md"))
 
-    # 6. Owned asset provenance needs evidence from staging AND final packaging.
+    # 7. Owned asset provenance needs evidence from staging AND final packaging.
     # This clears only old-theme icon provenance, never the project license.
     if assets is None or archive is None:
         blockers.append(("theme_asset_icons", "provide --assets and --archive for owned asset byte verification"))
@@ -107,7 +121,7 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
         else:
             passes.append(("theme_asset_icons", "staged and packaged assets match reviewed original SVGs and licensed fonts"))
 
-    # 7. Game-module distribution model. A public beta may carry the reviewed
+    # 8. Game-module distribution model. A public beta may carry the reviewed
     # precompiled module only at its canonical path and only with the explicit
     # disclosure policy present. The ROM itself remains forbidden by the
     # artifact scanner.
@@ -133,7 +147,7 @@ def run_checks(root=ROOT, assets=None, archive=None, public_beta=False):
         blockers.append(("game_distribution_model",
                          "public release requires --public-beta plus an audited archive containing the reviewed game module"))
 
-    # 8. Windows runtime redistribution: bundled DXC bytes are the pinned
+    # 9. Windows runtime redistribution: bundled DXC bytes are the pinned
     # official release, their license texts are the pinned upstream texts, and
     # the proprietary DXC validator (dxil.dll) is absent: the pinned compiler
     # signs shaders without it. Linux archives carry no DXC.

@@ -67,6 +67,9 @@ class PackageTest(unittest.TestCase):
                 self.assertIn('SnowboardKidsRecompiled/LICENSE', names)
                 self.assertIn('SnowboardKidsRecompiled/SOURCE-COMPLIANCE.md', names)
                 self.assertIn('SnowboardKidsRecompiled/BETA-DISTRIBUTION-POLICY.md', names)
+                self.assertIn('SnowboardKidsRecompiled/ROM-IDENTITY.md', names)
+                self.assertIn('SnowboardKidsRecompiled/LAUNCHER-INTEGRATION.md', names)
+                self.assertIn('SnowboardKidsRecompiled/scripts/rom_identity.py', names)
 
 
 if __name__ == '__main__':

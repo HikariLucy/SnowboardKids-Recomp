@@ -117,6 +117,12 @@ Developers can still rebuild the module locally. See [RUNNING.md](RUNNING.md).
 
 The initial beta intentionally supports one verified **Snowboard Kids (USA)** corpus.
 
+Normalized SHA-256:
+
+~~~text
+58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c
+~~~
+
 Normalized SHA-1:
 
 ~~~text
@@ -135,7 +141,7 @@ Supported input formats:
 - <code>.v64</code>
 - <code>.n64</code>
 
-Byte-order variants are normalized before validation. A matching filename or game ID alone is not enough; unsupported revisions and regions are rejected.
+Byte-order variants are normalized before validation. A matching filename or game ID alone is not enough; unsupported revisions and regions are rejected. See [ROM-IDENTITY.md](ROM-IDENTITY.md) for the complete canonical identity and a local verification tool.
 
 ## Playing
 
@@ -274,6 +280,8 @@ Before redistributing a binary build, see:
 ## Documentation
 
 - [Running the game](RUNNING.md)
+- [Supported ROM identity](ROM-IDENTITY.md)
+- [Launcher integration contract](LAUNCHER-INTEGRATION.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Current status](docs/STATUS.md)
 - [Windows development status](docs/WINDOWS.md)

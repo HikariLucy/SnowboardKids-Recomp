@@ -24,6 +24,7 @@ from module_builder.errors import (
 from module_builder.manifest import generate_manifest_data, write_manifest_file
 from module_builder.rom import (
     EXPECTED_SHA1,
+    EXPECTED_SHA256,
     detect_and_normalize_rom,
     validate_rom,
 )
@@ -45,6 +46,12 @@ def rom_file(suffix, data):
 
 
 class RomValidationTests(unittest.TestCase):
+    def test_canonical_hash_constants_are_well_formed(self):
+        self.assertEqual(EXPECTED_SHA1, "1583bacc9046a360df8ea4d536942155247e154c")
+        self.assertEqual(EXPECTED_SHA256, "58870ea67d49f778e7a7607eb270ad1d3a081a4733b337b2d607de2606dcfb3c")
+        self.assertEqual(len(EXPECTED_SHA1), 40)
+        self.assertEqual(len(EXPECTED_SHA256), 64)
+
     def test_rom_z64_detection_and_normalization(self):
         with rom_file(".z64", b'\x80\x37\x12\x40' + b'\x00' * (8 * 1024 * 1024 - 4)) as path:
             # Create synthetic 8MB .z64 image (starts with 0x80371240)
