@@ -91,6 +91,8 @@ def main():
 
     files = [('BUILD-INFO.txt', manifest, False),
              ('RUNNING.md', (ROOT / 'RUNNING.md').read_bytes(), False),
+             ('ROM-IDENTITY.md', (ROOT / 'ROM-IDENTITY.md').read_bytes(), False),
+             ('LAUNCHER-INTEGRATION.md', (ROOT / 'LAUNCHER-INTEGRATION.md').read_bytes(), False),
              ('THIRD_PARTY_NOTICES.md', notices, False),
              ('LICENSE', (ROOT / 'LICENSE').read_bytes(), False),
              ('SOURCE-COMPLIANCE.md', (ROOT / 'SOURCE-COMPLIANCE.md').read_bytes(), False),
@@ -102,6 +104,9 @@ def main():
     builder_script = ROOT / 'scripts' / 'build-game-module.py'
     if builder_script.is_file():
         files.append(('scripts/build-game-module.py', builder_script.read_bytes(), True))
+    identity_script = ROOT / 'scripts' / 'rom_identity.py'
+    if identity_script.is_file():
+        files.append(('scripts/rom_identity.py', identity_script.read_bytes(), True))
     module_builder_dir = ROOT / 'scripts' / 'module_builder'
     if module_builder_dir.is_dir():
         for py_file in sorted(module_builder_dir.glob('*.py')):
