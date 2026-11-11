@@ -8,6 +8,10 @@ Bindings are saved to `controls.json` in user data when the Controls tab closes 
 
 The footer may show the virtual controller as the last active input source when a test pad sends events. That label affects menu hints; it does not change which profile is being edited. The footer toggle selects the profile.
 
+For the measured transparent-red generic N64 USB pad, see the
+[optional Windows profile and setup](generic-n64-windows.md). The profile is
+loaded explicitly because its USB identifier is shared by different layouts.
+
 ## Audio
 
 The Audio tab exposes only the actual mixed output stream. Master Volume is a host-side linear gain from 0 to 100 percent on samples queued to SDL. Zero percent is mute. The guest AI FIFO byte counts, resampler history, and savestate audio mirror use the original samples. Music and SFX are not separate streams and are not exposed separately. `sound.json` lives in user data; invalid values fall back to defaults.
